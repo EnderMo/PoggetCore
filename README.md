@@ -10,9 +10,10 @@ PoggetCore 遵循严格的单向依赖与分层设计，将底层数据逻辑与
 
 ```mermaid
 graph TD
-    UI["VertexUI 渲染引擎 (VinaWindow / Direct2D)"] --> ViewState["UI 视图状态层 (struct Data / 零冗余引用代理)"]
-    ViewState --> Core["PoggetCore 业务逻辑层 (纯 C++20 / 无 GUI 依赖)"]
-    Core --> Storage["PoggetStorageProvider (100% 兼容持久化引擎)"]
-    Core --> CoreMgr["PoggetContainerManager (逻辑模型单例注册表)"]
+    UI["VinaUI (D3D9/D3D11) "] --> ViewState["UI 视图状态层 Data 引用代理"]
+    ViewState --> Core["PoggetCore 逻辑层 (无 GUI 依赖)"]
+    Core --> Storage["PoggetStorageProvider (持久化存储)"]
+    Core --> CoreMgr["PoggetContainerManager (收纳盒实例管理器)"]
     Core --> ItemMgr["PoggetCoreItemManager (文件元数据管理)"]
 ```
+
