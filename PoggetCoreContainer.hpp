@@ -62,6 +62,14 @@ namespace PoggetCore {
         bool IsSectionCollapsed = false;
         float backgroundAlpha = 1.0f;
         float titleAlpha = 1.0f;
+        int CompatibleLayer = 0;
+        bool EnableStaticMaterialLayerForD3D11 = false;
+        bool EnableDynamicMaterialLayerForD3D11 = false;
+        float cornerRad = 16.0f;
+        float shadowBlur = 16.0f;
+        float shadowAlpha = 0.2f;
+        float shadowOffsetX = 0.0f;
+        float shadowOffsetY = 4.0f;
 
         // 搜索与文件夹内联视图逻辑状态
         bool IsSearchMode = false;

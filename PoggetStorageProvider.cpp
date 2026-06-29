@@ -65,6 +65,14 @@ namespace PoggetCore {
         proxy[L"SwipeUpSearchEnabled"] = model.SwipeUpSearchEnabled;
         proxy[L"bgAlpha"] = static_cast<double>(model.backgroundAlpha);
         proxy[L"titleAlpha"] = static_cast<double>(model.titleAlpha);
+        proxy[L"CompatibleLayer"] = model.CompatibleLayer;
+        proxy[L"EnableStaticMaterialLayerForD3D11"] = model.EnableStaticMaterialLayerForD3D11;
+        proxy[L"EnableDynamicMaterialLayerForD3D11"] = model.EnableDynamicMaterialLayerForD3D11;
+        proxy[L"cornerRad"] = static_cast<double>(model.cornerRad);
+        proxy[L"shadowBlur"] = static_cast<double>(model.shadowBlur);
+        proxy[L"shadowAlpha"] = static_cast<double>(model.shadowAlpha);
+        proxy[L"shadowOffsetX"] = static_cast<double>(model.shadowOffsetX);
+        proxy[L"shadowOffsetY"] = static_cast<double>(model.shadowOffsetY);
         proxy[L"EnableInlineFolderView"] = model.EnableInlineFolderView;
     }
 
@@ -107,6 +115,14 @@ namespace PoggetCore {
         outModel.SwipeUpSearchEnabled = proxy[L"SwipeUpSearchEnabled"].get<bool>(true);
         outModel.backgroundAlpha = static_cast<float>(proxy[L"bgAlpha"].get<double>(1.0));
         outModel.titleAlpha = static_cast<float>(proxy[L"titleAlpha"].get<double>(1.0));
+        outModel.CompatibleLayer = proxy[L"CompatibleLayer"].get<int>(0);
+        outModel.EnableStaticMaterialLayerForD3D11 = proxy[L"EnableStaticMaterialLayerForD3D11"].get<bool>(false);
+        outModel.EnableDynamicMaterialLayerForD3D11 = proxy[L"EnableDynamicMaterialLayerForD3D11"].get<bool>(false);
+        outModel.cornerRad = static_cast<float>(proxy[L"cornerRad"].get<double>(16.0));
+        outModel.shadowBlur = static_cast<float>(proxy[L"shadowBlur"].get<double>(16.0));
+        outModel.shadowAlpha = static_cast<float>(proxy[L"shadowAlpha"].get<double>(0.2));
+        outModel.shadowOffsetX = static_cast<float>(proxy[L"shadowOffsetX"].get<double>(0.0));
+        outModel.shadowOffsetY = static_cast<float>(proxy[L"shadowOffsetY"].get<double>(4.0));
         outModel.EnableInlineFolderView = proxy[L"EnableInlineFolderView"].get<bool>(true);
         return true;
     }
