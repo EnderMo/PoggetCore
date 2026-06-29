@@ -3,9 +3,9 @@
 #include <string>
 #include <memory>
 #include <mutex>
-#include "../tsl/ordered_map.h"
+#include "tsl/ordered_map.h"
 #include "PoggetCoreContainer.hpp"
-#include "../PoggetStorage.hpp"
+#include "Storage/PoggetStorage.hpp"
 
 namespace PoggetCore {
 
