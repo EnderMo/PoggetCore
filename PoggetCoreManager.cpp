@@ -202,6 +202,7 @@ namespace PoggetCore {
 
         if (mainData.IconSpacingType == 1 && !isList) {
             void* tempLastOrigin = nullptr;
+            std::wstring activeSectionTitle = L"";
             Row currentTempRow;
             float hoverExpandX = (spacingMode == 1) ? 8.0f : ((spacingMode == 2) ? 18.0f : 0.0f);
             int E = 5 + static_cast<int>(hoverExpandX);
@@ -211,14 +212,6 @@ namespace PoggetCore {
                 void* targetWin = icons[i].originWindow ? icons[i].originWindow : containerWin;
                 
                 CoreContainerConfig targetData = getConfig(targetWin);
-                bool sectionCollapsed = false;
-                std::wstring tempCurrentSectionTitle = icons[i].sectionTitle.empty() ? targetData.title : icons[i].sectionTitle;
-                if (isSearchManager) sectionCollapsed = isSectionCollapsedInSearch(targetWin, tempCurrentSectionTitle);
-                else sectionCollapsed = (isIntegrated && !isInlineManager) ? targetData.IsSectionCollapsed : false;
-                if (sectionCollapsed) {
-                    icons[i].isCollapsed = true;
-                    continue;
-                }
 
                 bool sectionChanged = (targetWin != tempLastOrigin || (isSearchManager && mainData.IsInInlineFolderView && !icons[i].sectionTitle.empty()));
                 if (sectionChanged) {
@@ -229,9 +222,21 @@ namespace PoggetCore {
                         currentTempRow.isFull = false;
                     }
                     tempLastOrigin = targetWin;
+                    activeSectionTitle = icons[i].sectionTitle.empty() ? targetData.title : icons[i].sectionTitle;
+                } else if (!icons[i].sectionTitle.empty()) {
+                    activeSectionTitle = icons[i].sectionTitle;
                 }
+
+                bool sectionCollapsed = false;
+                if (isSearchManager) sectionCollapsed = isSectionCollapsedInSearch(targetWin, activeSectionTitle);
+                else sectionCollapsed = (isIntegrated && !isInlineManager) ? targetData.IsSectionCollapsed : false;
+                if (sectionCollapsed) {
+                    icons[i].isCollapsed = true;
+                    continue;
+                }
+
                 currentTempRow.targetWin = targetWin;
-                currentTempRow.sectionTitle = tempCurrentSectionTitle;
+                currentTempRow.sectionTitle = activeSectionTitle;
 
                 std::vector<size_t> testIndices = currentTempRow.iconIndices;
                 testIndices.push_back(i);
@@ -273,6 +278,7 @@ namespace PoggetCore {
         } else {
             int tempCursorX = 0;
             void* tempLastOrigin = nullptr;
+            std::wstring activeSectionTitle = L"";
             Row currentTempRow;
 
             for (size_t i = 0; i < icons.size(); ++i) {
@@ -280,17 +286,7 @@ namespace PoggetCore {
                 void* targetWin = icons[i].originWindow ? icons[i].originWindow : containerWin;
 
                 CoreContainerConfig targetData = getConfig(targetWin);
-                bool sectionCollapsed = false;
-                std::wstring tempCurrentSectionTitle = icons[i].sectionTitle.empty() ? targetData.title : icons[i].sectionTitle;
-                if (isSearchManager) sectionCollapsed = isSectionCollapsedInSearch(targetWin, tempCurrentSectionTitle);
-                else sectionCollapsed = (isIntegrated && !isInlineManager) ? targetData.IsSectionCollapsed : false;
-                if (sectionCollapsed) {
-                    icons[i].isCollapsed = true;
-                    continue;
-                }
 
-                bool isTxt = (!isList && (MatchWildcard(L"*.txt", icons[i].path) || MatchWildcard(L"*.md", icons[i].path)));
-                int itemSpan = isTxt ? 2 : 1;
                 bool sectionChanged = (targetWin != tempLastOrigin || (isSearchManager && mainData.IsInInlineFolderView && !icons[i].sectionTitle.empty()));
                 if (sectionChanged) {
                     if (!currentTempRow.iconIndices.empty()) {
@@ -299,7 +295,21 @@ namespace PoggetCore {
                     }
                     tempCursorX = 0;
                     tempLastOrigin = targetWin;
+                    activeSectionTitle = icons[i].sectionTitle.empty() ? targetData.title : icons[i].sectionTitle;
+                } else if (!icons[i].sectionTitle.empty()) {
+                    activeSectionTitle = icons[i].sectionTitle;
                 }
+
+                bool sectionCollapsed = false;
+                if (isSearchManager) sectionCollapsed = isSectionCollapsedInSearch(targetWin, activeSectionTitle);
+                else sectionCollapsed = (isIntegrated && !isInlineManager) ? targetData.IsSectionCollapsed : false;
+                if (sectionCollapsed) {
+                    icons[i].isCollapsed = true;
+                    continue;
+                }
+
+                bool isTxt = (!isList && (MatchWildcard(L"*.txt", icons[i].path) || MatchWildcard(L"*.md", icons[i].path)));
+                int itemSpan = isTxt ? 2 : 1;
                 if (tempCursorX + itemSpan > iconsPerRow && tempCursorX > 0) {
                     if (!currentTempRow.iconIndices.empty()) {
                         layoutRows.push_back(currentTempRow);
