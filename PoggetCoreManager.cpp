@@ -154,6 +154,7 @@ namespace PoggetCore {
 
         for (size_t i = 0; i < icons.size(); ++i) {
             icons[i].isVisible = true;
+            icons[i].isCollapsed = false;
             void* targetWin = icons[i].originWindow ? icons[i].originWindow : containerWin;
 
             if (!isSearchManager && mainData.IsSearchMode && !mainData.searchText.empty()) {
@@ -215,7 +216,7 @@ namespace PoggetCore {
                 if (isSearchManager) sectionCollapsed = isSectionCollapsedInSearch(targetWin, tempCurrentSectionTitle);
                 else sectionCollapsed = (isIntegrated && !isInlineManager) ? targetData.IsSectionCollapsed : false;
                 if (sectionCollapsed) {
-                    icons[i].isVisible = false;
+                    icons[i].isCollapsed = true;
                     continue;
                 }
 
@@ -284,7 +285,7 @@ namespace PoggetCore {
                 if (isSearchManager) sectionCollapsed = isSectionCollapsedInSearch(targetWin, tempCurrentSectionTitle);
                 else sectionCollapsed = (isIntegrated && !isInlineManager) ? targetData.IsSectionCollapsed : false;
                 if (sectionCollapsed) {
-                    icons[i].isVisible = false;
+                    icons[i].isCollapsed = true;
                     continue;
                 }
 
@@ -332,6 +333,9 @@ namespace PoggetCore {
 
         for (size_t i = 0; i < icons.size(); ++i) {
             icons[i].customWidth = -1.0f;
+        }
+
+        for (size_t i = 0; i < icons.size(); ++i) {
             if (!icons[i].isVisible) {
                 icons[i].targetX = -100.0f;
                 icons[i].targetY = -100.0f;
@@ -361,6 +365,12 @@ namespace PoggetCore {
                     cursorYBase += 50; // 35px height + 10px spacing
                 }
                 lastOrigin = targetWin;
+            }
+
+            if (icons[i].isCollapsed) {
+                icons[i].targetX = -100.0f;
+                icons[i].targetY = -100.0f;
+                continue;
             }
 
             icons[i].isCollapsed = false;

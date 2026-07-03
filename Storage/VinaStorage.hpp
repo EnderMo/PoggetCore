@@ -14,6 +14,7 @@
 #include <type_traits> 
 #include <cstring> 
 #include <any> 
+#include <filesystem>
 
 #ifdef _WIN32
 #include <Windows.h>
@@ -65,7 +66,7 @@ inline std::wstring UTF8ToWString(const std::string& str) {
     return wstrTo;
 }
 #else
-// 简化处理：在非 Windows 平台，假设 char/std::string 是 UTF-8，wstring 是 UTF-32 (或平台依赖)
+// 在非 Windows 平台，假设 char/std::string 是 UTF-8，wstring 是 UTF-32 (或平台依赖)
 // 这里的实现将是错误的，但在您明确要求 Windows API 的前提下，我们只在 _WIN32 宏下使用。
 // 如果您需要在跨平台项目中使用，请使用 ICU 或 C++20 的 std::string_view::to_wstring 等。
 inline std::string WStringToUTF8(const std::wstring& wstr) {
@@ -89,6 +90,7 @@ inline std::wstring UTF8ToWString(const std::string& str) {
 class VinaStorage {
 private:
     std::wstring filename_;
+    std::wstring backup_path_;
     // 根对象列表也改为有序 Map，以保持多个根对象的顺序
     tsl::ordered_map<std::wstring, VinaStorageObjectMap> root_objects_;
     bool loaded_ = false; // Add a flag to track if file is loaded
@@ -332,80 +334,121 @@ private:
         }
     }
 
-
-public:
-
-    VinaStorage() : filename_(L""), loaded_(false) {}
-
-    void Load(const std::wstring& filename) {
-        filename_ = filename;
-        loaded_ = false; // Reset flag
-
+private:
+    bool LoadInternal(const std::wstring& filename) {
 #ifdef _WIN32
-        std::ifstream file_check(filename);
-        bool file_exists = file_check.good();
-        file_check.close();
-
-        if (!file_exists) {
-            std::wcout << L"Info: File '" << filename << L"' does not exist. Creating new storage." << std::endl;
-            loaded_ = true; // Consider it loaded (as an empty structure)
-            return;
-        }
-
         std::ifstream file_stream(filename);
         if (!file_stream.is_open()) {
-            // 路径可能包含中文，如果打开失败，转回 UTF-8 仅用于异常信息打印
-            std::string filename_utf8 = WStringToUTF8(filename);
-            throw std::runtime_error("Could not open file for reading: " + filename_utf8);
+            return false;
         }
 
-        // 读取整个文件内容的 UTF-8 窄字符串
         std::stringstream buffer;
         buffer << file_stream.rdbuf();
         std::string utf8_content = buffer.str();
-
-        // 将 UTF-8 窄字符串转换为 UTF-16 宽字符串 (包含中文)
         std::wstring wcontent = UTF8ToWString(utf8_content);
-
-        // 将宽字符串内容放入宽字符串流中，供 VinaParser 使用
         std::wstringstream wide_stream(wcontent);
-
-        // 使用 std::wstringstream 代替 std::wfstream
         vui::parser::basic_parser<std::wstringstream, wchar_t> parser(std::move(wide_stream));
-
 #else
-        std::wifstream file_check(filename);
-        bool file_exists = file_check.good();
-        file_check.close();
-
-        if (!file_exists) {
-            std::wcout << L"Info: File '" << filename << L"' does not exist. Creating new storage." << std::endl;
-            loaded_ = true;
-            return;
-        }
-
         std::wfstream file_stream(filename, std::ios::in);
         if (!file_stream.is_open()) {
-            throw std::runtime_error("Could not open file for reading: " + std::string(filename.begin(), filename.end()));
+            return false;
         }
-
-        // 假设这里直接使用 std::wfstream
         vui::parser::basic_parser<std::wfstream, wchar_t> parser(std::move(file_stream));
 #endif
 
         if (!parser.parse()) {
-            // Handle parse error if needed
+            return false;
         }
 
-        root_objects_.clear(); // Clear old data before loading new
+        root_objects_.clear();
         for (auto parsed_root_obj : parser) {
             std::wstring obj_name = parsed_root_obj.name();
             VinaStorageObjectMap converted_map = convertBasicObjectToMap(parsed_root_obj);
             root_objects_[obj_name] = converted_map;
         }
 
+        return true;
+    }
+
+
+public:
+
+    VinaStorage() : filename_(L""), loaded_(false) {}
+
+    void SetBackupPath(const std::wstring& backup_path) {
+        backup_path_ = backup_path;
+    }
+
+    void Load(const std::wstring& filename) {
+        filename_ = filename;
+        loaded_ = false;
+
+        // Check if primary file exists
+#ifdef _WIN32
+        DWORD dwAttrs = GetFileAttributesW(filename.c_str());
+        bool file_exists = (dwAttrs != INVALID_FILE_ATTRIBUTES && !(dwAttrs & FILE_ATTRIBUTE_DIRECTORY));
+#else
+        std::wifstream file_check(filename);
+        bool file_exists = file_check.good();
+        file_check.close();
+#endif
+
+        if (!file_exists) {
+            std::wcout << L"Info: File '" << filename << L"' does not exist. Creating new storage." << std::endl;
+            root_objects_.clear();
+            loaded_ = true;
+            return;
+        }
+
+        // Try loading primary file
+        if (LoadInternal(filename)) {
+            loaded_ = true;
+            std::wcout << L"VinaStorage loaded from '" << filename << L"' (" << root_objects_.size() << L" root objects)." << std::endl;
+            return;
+        }
+
+        // If primary file failed to load, try backup file
+        std::wstring backup_filename = backup_path_.empty() ? (filename + L".bak") : backup_path_;
+#ifdef _WIN32
+        DWORD dwBackupAttrs = GetFileAttributesW(backup_filename.c_str());
+        bool backup_exists = (dwBackupAttrs != INVALID_FILE_ATTRIBUTES && !(dwBackupAttrs & FILE_ATTRIBUTE_DIRECTORY));
+#else
+        std::wifstream backup_check(backup_filename);
+        bool backup_exists = backup_check.good();
+        backup_check.close();
+#endif
+
+        if (backup_exists) {
+            std::wcerr << L"Warning: Failed to load primary file '" << filename << L"'. Attempting to restore from backup '" << backup_filename << L"'." << std::endl;
+            if (LoadInternal(backup_filename)) {
+                loaded_ = true;
+                std::wcout << L"VinaStorage successfully restored and loaded from backup." << std::endl;
+                
+                // Copy backup back to primary file to fix it
+#ifdef _WIN32
+                CopyFileW(backup_filename.c_str(), filename.c_str(), FALSE);
+#else
+                std::ifstream src(backup_filename, std::ios::binary);
+                std::ofstream dst(filename, std::ios::binary);
+                dst << src.rdbuf();
+#endif
+                return;
+            }
+        }
+
+        // If both failed or backup doesn't exist, we rename the corrupted file to .corrupted,
+        // and then load an empty configuration to prevent crash.
+        std::wcerr << L"Error: Failed to load both primary and backup storage files for '" << filename << L"'. Resetting to empty configuration." << std::endl;
+        
+        std::wstring corrupted_filename = filename + L".corrupted";
+#ifdef _WIN32
+        MoveFileExW(filename.c_str(), corrupted_filename.c_str(), MOVEFILE_REPLACE_EXISTING);
+#else
+        std::rename(WStringToUTF8(filename).c_str(), WStringToUTF8(corrupted_filename).c_str());
+#endif
+
+        root_objects_.clear();
         loaded_ = true;
-        std::wcout << L"VinaStorage loaded from '" << filename << L"' (" << root_objects_.size() << L" root objects)." << std::endl;
     }
 
     // Check if a file is currently loaded
@@ -427,32 +470,139 @@ public:
             populateVinaObject(root_obj, obj_data);
         }
 
-
         std::wstring wcontent = builder.GetContent();
 
 #ifdef _WIN32
-
         std::string utf8_content = WStringToUTF8(wcontent);
 
+        std::wstring temp_filename = filename_ + L".tmp";
+        std::wstring backup_filename = backup_path_.empty() ? (filename_ + L".bak") : backup_path_;
 
-        std::ofstream file_stream(filename_);
-        if (!file_stream.is_open()) {
-            std::string filename_utf8 = WStringToUTF8(filename_);
-            throw std::runtime_error("Could not save to file (ofstream): " + filename_utf8);
+        // 1. Ensure parent directory of backup_filename exists
+        {
+            std::filesystem::path p(backup_filename);
+            std::error_code ec;
+            std::filesystem::create_directories(p.parent_path(), ec);
         }
 
+        // 2. Write content to temp file
+        {
+            std::ofstream file_stream(temp_filename, std::ios::out | std::ios::binary);
+            if (!file_stream.is_open()) {
+                std::string filename_utf8 = WStringToUTF8(temp_filename);
+                throw std::runtime_error("Could not open temp file for writing: " + filename_utf8);
+            }
+            file_stream << utf8_content;
+            file_stream.flush();
+            if (!file_stream.good()) {
+                std::string filename_utf8 = WStringToUTF8(temp_filename);
+                throw std::runtime_error("Error writing to temp file: " + filename_utf8);
+            }
+        } // file_stream closed here
 
+        // 3. Flush OS file buffers to physical storage to prevent data loss on power cut / forced shutdown
+        HANDLE hFile = CreateFileW(
+            temp_filename.c_str(),
+            GENERIC_WRITE,
+            FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE,
+            NULL,
+            OPEN_EXISTING,
+            FILE_FLAG_WRITE_THROUGH,
+            NULL
+        );
+        if (hFile != INVALID_HANDLE_VALUE) {
+            FlushFileBuffers(hFile);
+            CloseHandle(hFile);
+        }
 
-        file_stream << utf8_content;
+        // 4. Atomically replace the original file with retry loop for anti-virus/sync locks
+        DWORD dwAttrs = GetFileAttributesW(filename_.c_str());
+        bool original_exists = (dwAttrs != INVALID_FILE_ATTRIBUTES && !(dwAttrs & FILE_ATTRIBUTE_DIRECTORY));
 
-        if (!file_stream.good()) {
-            std::string filename_utf8 = WStringToUTF8(filename_);
-            throw std::runtime_error("Error writing to file: " + filename_utf8);
+        bool replace_success = false;
+        int max_retries = 5;
+        for (int i = 0; i < max_retries; ++i) {
+            if (original_exists) {
+                // Replace original file atomically and create backup
+                if (ReplaceFileW(filename_.c_str(), temp_filename.c_str(), backup_filename.c_str(), REPLACEFILE_WRITE_THROUGH, NULL, NULL)) {
+                    replace_success = true;
+                    break;
+                }
+            } else {
+                // Original file does not exist, just rename temp to original
+                if (MoveFileExW(temp_filename.c_str(), filename_.c_str(), MOVEFILE_REPLACE_EXISTING | MOVEFILE_WRITE_THROUGH)) {
+                    replace_success = true;
+                    break;
+                }
+            }
+            
+            DWORD err = GetLastError();
+            // If it's a sharing violation or access denied, sleep and retry
+            if (err == ERROR_SHARING_VIOLATION || err == ERROR_ACCESS_DENIED) {
+                Sleep(20 + i * 20); // Exponential backoff: 20ms, 40ms, 60ms, 80ms, 100ms
+                continue;
+            } else {
+                break; // Other error, exit retry loop
+            }
+        }
+
+        // 5. Fallback if ReplaceFileW / MoveFileExW failed
+        if (!replace_success) {
+            std::wcerr << L"Warning: Atomic save failed (error " << GetLastError() << L"). Falling back to manual backup copy." << std::endl;
+            
+            // Manual backup copy
+            if (original_exists) {
+                CopyFileW(filename_.c_str(), backup_filename.c_str(), FALSE);
+            }
+            
+            // Move temp to original with retry loop
+            bool move_success = false;
+            for (int i = 0; i < max_retries; ++i) {
+                if (MoveFileExW(temp_filename.c_str(), filename_.c_str(), MOVEFILE_REPLACE_EXISTING | MOVEFILE_WRITE_THROUGH)) {
+                    move_success = true;
+                    break;
+                }
+                DWORD err = GetLastError();
+                if (err == ERROR_SHARING_VIOLATION || err == ERROR_ACCESS_DENIED) {
+                    Sleep(20 + i * 20);
+                    continue;
+                } else {
+                    break;
+                }
+            }
+
+            if (!move_success) {
+                DeleteFileW(temp_filename.c_str());
+                std::string filename_utf8 = WStringToUTF8(filename_);
+                throw std::runtime_error("Could not replace original file (MoveFileExW fallback): " + filename_utf8 + " (Error code: " + std::to_string(GetLastError()) + ")");
+            }
         }
 #else
+        // Non-Windows platform fallback
+        std::wstring temp_filename = filename_ + L".tmp";
+        std::wstring backup_filename = backup_path_.empty() ? (filename_ + L".bak") : backup_path_;
 
-        if (!builder.SaveToFile(filename_)) {
-            throw std::runtime_error("Could not save to file: " + std::string(filename_.begin(), filename_.end()));
+        // Ensure parent directory exists
+        {
+            std::filesystem::path p(backup_filename);
+            std::error_code ec;
+            std::filesystem::create_directories(p.parent_path(), ec);
+        }
+
+        if (!builder.SaveToFile(temp_filename)) {
+            throw std::runtime_error("Could not save to temp file: " + std::string(temp_filename.begin(), temp_filename.end()));
+        }
+
+        // Create backup of old file if it exists
+        std::wifstream check(filename_);
+        if (check.good()) {
+            check.close();
+            std::rename(WStringToUTF8(filename_).c_str(), WStringToUTF8(backup_filename).c_str());
+        }
+
+        // Rename temp to original
+        if (std::rename(WStringToUTF8(temp_filename).c_str(), WStringToUTF8(filename_).c_str()) != 0) {
+            throw std::runtime_error("Could not rename temp file to original path.");
         }
 #endif
         std::wcout << L"VinaStorage saved to '" << filename_ << L"'." << std::endl;

@@ -13,6 +13,9 @@ namespace PoggetCore {
         std::lock_guard<std::mutex> lock(m_mutex);
         m_filePath = filePath;
         try {
+            std::filesystem::path p(filePath);
+            std::wstring backupPath = (p.parent_path() / L"Backups" / L"BufferBak" / p.filename()).wstring();
+            m_storage.SetBackupPath(backupPath);
             m_storage.Load(filePath);
             m_isInitialized = true;
         } catch (const std::exception& e) {
