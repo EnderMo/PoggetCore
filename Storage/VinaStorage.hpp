@@ -625,6 +625,7 @@ public:
         class Iterator {
         private:
             MapIterator current_it_;
+            bool is_null_;
 
         public:
             using iterator_category = std::bidirectional_iterator_tag;
@@ -634,17 +635,25 @@ public:
             using reference = PairType;// 返回 pair<const WString, VinaStorageValue&>
 
             // 构造函数
-            Iterator(MapIterator it) : current_it_(it) {}
+            Iterator(MapIterator it) : current_it_(it), is_null_(false) {}
+
+            // 默认构造函数 (null iterator)
+            Iterator() : is_null_(true) {}
 
             // 解引用操作符
             reference operator*() const {
+                if (is_null_) {
+                    throw std::runtime_error("Dereferencing null VinaStorage::Proxy::Iterator");
+                }
                 // 强制转换以匹配 PairType 的 VinaStorageValue&
                 return { current_it_->first, const_cast<VinaStorageValue&>(current_it_->second) };
             }
 
             // 前置自增
             Iterator& operator++() {
-                ++current_it_;
+                if (!is_null_) {
+                    ++current_it_;
+                }
                 return *this;
             }
 
@@ -657,6 +666,12 @@ public:
 
             // 相等性比较
             bool operator==(const Iterator& other) const {
+                if (is_null_ && other.is_null_) {
+                    return true;
+                }
+                if (is_null_ || other.is_null_) {
+                    return false;
+                }
                 return current_it_ == other.current_it_;
             }
 
@@ -687,7 +702,7 @@ public:
                 return Iterator(target_map->begin());
             }
             // 如果不是嵌套对象或根对象，则返回一个空迭代器
-            return Iterator(MapIterator());
+            return Iterator();
         }
 
         // 用于范围 for 循环的 end 方法 (新增)
@@ -709,7 +724,7 @@ public:
             if (target_map) {
                 return Iterator(target_map->end());
             }
-            return Iterator(MapIterator());
+            return Iterator();
         }
 
 
