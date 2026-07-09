@@ -38,6 +38,7 @@ namespace PoggetCore {
         int IconSizeLevel = 3;
         bool ShowDefaultFolderIcon = false;
         bool ShowTextPreview = true;
+        bool ShowMediaPreview = true;
         int HideFileExtension = 0; // 0,1,2
         int IconSpacingMode = 0;
         int IconSpacingType = 0;

@@ -28,6 +28,7 @@ namespace PoggetCore {
         std::wstring title = L"";
         bool IsSectionCollapsed = false;
         bool ShowTextPreview = true;
+        bool ShowMediaPreview = true;
     };
 
     struct CoreIconLayoutData {
