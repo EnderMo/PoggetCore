@@ -962,7 +962,6 @@ public:
         return it->second;
     }
 
-    // END: 保持不变的代码片段
 };
 
 inline void print_value(const VinaStorageValue& value) {
