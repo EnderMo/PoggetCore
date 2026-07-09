@@ -858,12 +858,12 @@ public:
                     try {
                         return (T)std::get<int>(it->second);
                     }
-                    catch (const std::bad_variant_access&) {
+                    catch (const std::exception&) {
                         try {
                             // 允许从 double 隐式转换
                             return (T)std::get<double>(it->second);
                         }
-                        catch (const std::bad_variant_access&) {
+                        catch (const std::exception&) {
                             // 进一步：尝试从 string 转换 (可选)
                             return default_value;
                         }
@@ -874,12 +874,12 @@ public:
                     try {
                         return (T)std::get<double>(it->second);
                     }
-                    catch (const std::bad_variant_access&) {
+                    catch (const std::exception&) {
                         try {
                             // 允许从 int 隐式转换
                             return (T)std::get<int>(it->second);
                         }
-                        catch (const std::bad_variant_access&) {
+                        catch (const std::exception&) {
                             return default_value;
                         }
                     }
@@ -895,7 +895,10 @@ public:
                     return std::get<T>(it->second);
                 }
             }
-            catch (const std::bad_variant_access&) {
+            catch (const std::exception&) {
+                return default_value;
+            }
+            catch (...) {
                 return default_value;
             }
         }
@@ -945,15 +948,7 @@ public:
         auto root_it = root_objects_.find(root_obj_name);
         if (root_it != root_objects_.end()) {
             auto& root_map = root_it->second;
-            auto it = root_map.find(key);
-            if (it != root_map.end()) {
-                try {
-                    return std::get<T>(it->second);
-                }
-                catch (const std::bad_variant_access&) {
-                    return default_value;
-                }
-            }
+            return Proxy(const_cast<VinaStorageObjectMap*>(&root_map), key, false).template get<T>(default_value);
         }
         return default_value;
     }
@@ -961,7 +956,8 @@ public:
     const VinaStorageObjectMap& GetRootObjectMap(const std::wstring& root_obj_name) const {
         auto it = root_objects_.find(root_obj_name);
         if (it == root_objects_.end()) {
-            throw std::out_of_range("Root object not found: " + std::string(root_obj_name.begin(), root_obj_name.end()));
+            static const VinaStorageObjectMap empty_map;
+            return empty_map;
         }
         return it->second;
     }

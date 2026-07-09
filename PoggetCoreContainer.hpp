@@ -37,6 +37,7 @@ namespace PoggetCore {
         int SortMode = 0; // 0: 自由, 1: 名称正序, 2: 名称倒序, 3: 时间正序, 4: 时间倒序
         int IconSizeLevel = 3;
         bool ShowDefaultFolderIcon = false;
+        bool ShowTextPreview = true;
         int HideFileExtension = 0; // 0,1,2
         int IconSpacingMode = 0;
         int IconSpacingType = 0;

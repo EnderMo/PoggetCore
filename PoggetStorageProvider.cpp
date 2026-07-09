@@ -46,6 +46,7 @@ namespace PoggetCore {
         proxy[L"SortMode"] = model.SortMode;
         proxy[L"IconSizeLevel"] = model.IconSizeLevel;
         proxy[L"ShowDefaultFolderIcon"] = model.ShowDefaultFolderIcon;
+        proxy[L"ShowTextPreview"] = model.ShowTextPreview;
         proxy[L"HideFileExtension"] = model.HideFileExtension;
         proxy[L"IconSpacingMode"] = model.IconSpacingMode;
         proxy[L"IconSpacingType"] = model.IconSpacingType;
@@ -96,6 +97,7 @@ namespace PoggetCore {
         outModel.SortMode = proxy[L"SortMode"].get<int>(0);
         outModel.IconSizeLevel = proxy[L"IconSizeLevel"].get<int>(3);
         outModel.ShowDefaultFolderIcon = proxy[L"ShowDefaultFolderIcon"].get<bool>(false);
+        outModel.ShowTextPreview = proxy[L"ShowTextPreview"].get<bool>(true);
         outModel.HideFileExtension = proxy[L"HideFileExtension"].get<int>(0);
         outModel.IconSpacingMode = proxy[L"IconSpacingMode"].get<int>(0);
         outModel.IconSpacingType = proxy[L"IconSpacingType"].get<int>(0);

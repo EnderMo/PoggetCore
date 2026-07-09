@@ -243,7 +243,8 @@ namespace PoggetCore {
                 int testNumItems = static_cast<int>(testIndices.size());
                 int minRequiredWidth = 0;
                 for (size_t idx : testIndices) {
-                    bool isTxt = (MatchWildcard(L"*.txt", icons[idx].path) || MatchWildcard(L"*.md", icons[idx].path));
+                    void* tWin = icons[idx].originWindow ? icons[idx].originWindow : containerWin;
+                    bool isTxt = (getConfig(tWin).ShowTextPreview && (MatchWildcard(L"*.txt", icons[idx].path) || MatchWildcard(L"*.md", icons[idx].path)));
                     if (isTxt) {
                         int w_base = iconSize * 2 + 12;
                         int maxShrink = w_base / 6;
@@ -308,7 +309,7 @@ namespace PoggetCore {
                     continue;
                 }
 
-                bool isTxt = (!isList && (MatchWildcard(L"*.txt", icons[i].path) || MatchWildcard(L"*.md", icons[i].path)));
+                bool isTxt = (!isList && getConfig(targetWin).ShowTextPreview && (MatchWildcard(L"*.txt", icons[i].path) || MatchWildcard(L"*.md", icons[i].path)));
                 int itemSpan = isTxt ? 2 : 1;
                 if (tempCursorX + itemSpan > iconsPerRow && tempCursorX > 0) {
                     if (!currentTempRow.iconIndices.empty()) {
@@ -384,7 +385,7 @@ namespace PoggetCore {
             }
 
             icons[i].isCollapsed = false;
-            bool isTxt = (!isList && (MatchWildcard(L"*.txt", icons[i].path) || MatchWildcard(L"*.md", icons[i].path)));
+            bool isTxt = (!isList && getConfig(targetWin).ShowTextPreview && (MatchWildcard(L"*.txt", icons[i].path) || MatchWildcard(L"*.md", icons[i].path)));
             int itemSpan = isTxt ? 2 : 1;
 
             if (mainData.IconSpacingType == 1 && !isList) {
@@ -414,7 +415,8 @@ namespace PoggetCore {
                 if (mainData.IconSpacingType == 1 && !isList && numItems > 0) {
                     int totalSpan = 0;
                     for (size_t idx : row.iconIndices) {
-                        bool isTxt = (!isList && (MatchWildcard(L"*.txt", icons[idx].path) || MatchWildcard(L"*.md", icons[idx].path)));
+                        void* tWin = icons[idx].originWindow ? icons[idx].originWindow : containerWin;
+                        bool isTxt = (!isList && getConfig(tWin).ShowTextPreview && (MatchWildcard(L"*.txt", icons[idx].path) || MatchWildcard(L"*.md", icons[idx].path)));
                         totalSpan += isTxt ? 2 : 1;
                     }
                     bool isRowFull = row.isFull || (totalSpan >= iconsPerRow);
@@ -422,7 +424,8 @@ namespace PoggetCore {
                     int totalUnshrunkWidth = 0;
                     int numWidgets = 0;
                     for (size_t idx : row.iconIndices) {
-                        bool isTxt = (!isList && (MatchWildcard(L"*.txt", icons[idx].path) || MatchWildcard(L"*.md", icons[idx].path)));
+                        void* tWin = icons[idx].originWindow ? icons[idx].originWindow : containerWin;
+                        bool isTxt = (!isList && getConfig(tWin).ShowTextPreview && (MatchWildcard(L"*.txt", icons[idx].path) || MatchWildcard(L"*.md", icons[idx].path)));
                         if (isTxt) {
                             numWidgets++;
                             totalUnshrunkWidth += (iconSize * 2 + 12);
@@ -493,7 +496,8 @@ namespace PoggetCore {
                         }
 
                         for (size_t idx : row.iconIndices) {
-                            bool isTxt = (!isList && (MatchWildcard(L"*.txt", icons[idx].path) || MatchWildcard(L"*.md", icons[idx].path)));
+                            void* tWin = icons[idx].originWindow ? icons[idx].originWindow : containerWin;
+                            bool isTxt = (!isList && getConfig(tWin).ShowTextPreview && (MatchWildcard(L"*.txt", icons[idx].path) || MatchWildcard(L"*.md", icons[idx].path)));
                             if (isTxt) icons[idx].customWidth = static_cast<float>((iconSize * 2 + 12) + stretchPerWidget);
                             else icons[idx].customWidth = -1.0f;
                         }

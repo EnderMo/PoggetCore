@@ -1,4 +1,4 @@
-﻿/**
+/**
  * @file vui.parser.basic.hpp
  * @author Haceau (haceau@qq.com)
  * @brief vui 解析器的通用基本类。
@@ -640,8 +640,22 @@ namespace vui::parser
                 else out = "";
             }
             // 数字类型判断：如果 is_integer/is_decimal 仍为 true，则转换为 int/double
-            else if (is_integer && !s.empty() && s != string_type{ L"-" }) out = std::stoi(s);
-            else if (is_decimal && !s.empty() && s != string_type{ L"." }&& s != string_type{ L"-." }) out = std::stod(s);
+            else if (is_integer && !s.empty() && s != string_type{ L"-" }) {
+                try {
+                    out = std::stoi(s);
+                }
+                catch (...) {
+                    out = s;
+                }
+            }
+            else if (is_decimal && !s.empty() && s != string_type{ L"." }&& s != string_type{ L"-." }) {
+                try {
+                    out = std::stod(s);
+                }
+                catch (...) {
+                    out = s;
+                }
+            }
             // 布尔值判断
             else if (s == string_type{ L"true" }) out = true;
             else if (s == string_type{ L"false" }) out = false;
