@@ -30,6 +30,7 @@ namespace PoggetCore {
     }
 
     void PoggetStorageProvider::SubmitContainerModel(const ContainerModel& model) {
+
         std::lock_guard<std::mutex> lock(m_mutex);
         if (model.id.empty()) return;
         std::wstring key = FormatCompKey(model.id);
