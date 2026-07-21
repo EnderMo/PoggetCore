@@ -41,6 +41,9 @@ namespace PoggetCore {
         proxy[L"title"] = model.title;
         proxy[L"IsMinimized"] = model.IsMinimized;
         proxy[L"IsIntegrated"] = model.IsIntegrated;
+        proxy[L"IsMergedHost"] = model.IsMergedHost;
+        proxy[L"MergedHostColor"] = model.MergedHostColor;
+        proxy[L"MergedHostId"] = model.MergedHostId;
         proxy[L"UseTargetFolder"] = model.UseTargetFolder;
         proxy[L"TargetFolder"] = model.TargetFolder;
         proxy[L"IsCustomTarget"] = model.IsCustomTarget;
@@ -65,6 +68,7 @@ namespace PoggetCore {
         proxy[L"IsUpwardExpand"] = model.IsUpwardExpand;
         proxy[L"TransparentFrameMode"] = model.TransparentFrameMode;
         proxy[L"AutoHideTitleBar"] = model.AutoHideTitleBar;
+        proxy[L"QuickExpandCollapse"] = model.QuickExpandCollapse;
         proxy[L"AutoFade"] = model.AutoFade;
         proxy[L"AutoFadeDragStat"] = model.AutoFadeDragStat;
         proxy[L"FolderOpenMode"] = model.FolderOpenMode;
@@ -80,6 +84,7 @@ namespace PoggetCore {
         proxy[L"shadowOffsetX"] = static_cast<double>(model.shadowOffsetX);
         proxy[L"shadowOffsetY"] = static_cast<double>(model.shadowOffsetY);
         proxy[L"EnableInlineFolderView"] = model.EnableInlineFolderView;
+        proxy[L"textSize"] = static_cast<double>(model.textSize);
     }
 
     bool PoggetStorageProvider::LoadContainerModel(const std::wstring& containerId, ContainerModel& outModel) {
@@ -93,6 +98,9 @@ namespace PoggetCore {
         outModel.title = proxy[L"title"].get<std::wstring>(L"Unnamed");
         outModel.IsMinimized = proxy[L"IsMinimized"].get<bool>(false);
         outModel.IsIntegrated = proxy[L"IsIntegrated"].get<bool>(false);
+        outModel.IsMergedHost = proxy[L"IsMergedHost"].get<bool>(false);
+        outModel.MergedHostColor = proxy[L"MergedHostColor"].get<std::wstring>(L"");
+        outModel.MergedHostId = proxy[L"MergedHostId"].get<std::wstring>(L"");
         outModel.UseTargetFolder = proxy[L"UseTargetFolder"].get<bool>(false);
         outModel.TargetFolder = proxy[L"TargetFolder"].get<std::wstring>(L"vui!NULL");
         outModel.IsCustomTarget = proxy[L"IsCustomTarget"].get<bool>(false);
@@ -117,6 +125,7 @@ namespace PoggetCore {
         outModel.IsUpwardExpand = proxy[L"IsUpwardExpand"].get<bool>(false);
         outModel.TransparentFrameMode = proxy[L"TransparentFrameMode"].get<int>(0);
         outModel.AutoHideTitleBar = proxy[L"AutoHideTitleBar"].get<int>(0);
+        outModel.QuickExpandCollapse = proxy[L"QuickExpandCollapse"].get<int>(1);
         outModel.AutoFade = proxy[L"AutoFade"].get<int>(0);
         outModel.AutoFadeDragStat = proxy[L"AutoFadeDragStat"].get<bool>(false);
         outModel.FolderOpenMode = proxy[L"FolderOpenMode"].get<int>(0);
@@ -132,6 +141,7 @@ namespace PoggetCore {
         outModel.shadowOffsetX = static_cast<float>(proxy[L"shadowOffsetX"].get<double>(0.0));
         outModel.shadowOffsetY = static_cast<float>(proxy[L"shadowOffsetY"].get<double>(4.0));
         outModel.EnableInlineFolderView = proxy[L"EnableInlineFolderView"].get<bool>(true);
+        outModel.textSize = static_cast<float>(proxy[L"textSize"].get<double>(10.0));
         return true;
     }
 

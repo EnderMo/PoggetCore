@@ -22,6 +22,12 @@ namespace PoggetCore {
         CoreContainerConfig mainData = getConfig(containerWin);
         bool needsSort = false;
         bool isIntegrated = mainData.IsIntegrated || isSearchManager;
+        auto showTextPreviewFor = [&](void* targetWin) {
+            if (mainData.IsIntegrated && !isSearchManager && !isInlineManager) {
+                return mainData.ShowTextPreview;
+            }
+            return getConfig(targetWin).ShowTextPreview;
+        };
 
         if (isIntegrated && !isInlineManager && !isSearchManager) {
             needsSort = true;
@@ -45,7 +51,8 @@ namespace PoggetCore {
                 }
             }
 
-            std::stable_sort(icons.begin(), icons.end(), [&originOrder, containerWin, &getConfig](const CoreIconLayoutData& a, const CoreIconLayoutData& b) {
+            std::stable_sort(icons.begin(), icons.end(), [&originOrder, containerWin, &getConfig,
+                &mainData, isIntegrated, isSearchManager](const CoreIconLayoutData& a, const CoreIconLayoutData& b) {
                 void* aWin = a.originWindow ? a.originWindow : containerWin;
                 void* bWin = b.originWindow ? b.originWindow : containerWin;
 
@@ -55,8 +62,9 @@ namespace PoggetCore {
                     return orderA < orderB;
                 }
 
-                CoreContainerConfig aData = getConfig(aWin);
-                int mode = aData.SortMode;
+                int mode = (isIntegrated && !isSearchManager)
+                    ? mainData.SortMode
+                    : getConfig(aWin).SortMode;
 
                 if (mode == 1) return a.cachedName < b.cachedName;
                 if (mode == 2) return a.cachedName > b.cachedName;
@@ -244,7 +252,7 @@ namespace PoggetCore {
                 int minRequiredWidth = 0;
                 for (size_t idx : testIndices) {
                     void* tWin = icons[idx].originWindow ? icons[idx].originWindow : containerWin;
-                    bool isTxt = (getConfig(tWin).ShowTextPreview && (MatchWildcard(L"*.txt", icons[idx].path) || MatchWildcard(L"*.md", icons[idx].path)));
+                    bool isTxt = (showTextPreviewFor(tWin) && (MatchWildcard(L"*.txt", icons[idx].path) || MatchWildcard(L"*.md", icons[idx].path)));
                     if (isTxt) {
                         int w_base = iconSize * 2 + 12;
                         int maxShrink = w_base / 6;
@@ -309,7 +317,7 @@ namespace PoggetCore {
                     continue;
                 }
 
-                bool isTxt = (!isList && getConfig(targetWin).ShowTextPreview && (MatchWildcard(L"*.txt", icons[i].path) || MatchWildcard(L"*.md", icons[i].path)));
+                bool isTxt = (!isList && showTextPreviewFor(targetWin) && (MatchWildcard(L"*.txt", icons[i].path) || MatchWildcard(L"*.md", icons[i].path)));
                 int itemSpan = isTxt ? 2 : 1;
                 if (tempCursorX + itemSpan > iconsPerRow && tempCursorX > 0) {
                     if (!currentTempRow.iconIndices.empty()) {
@@ -369,11 +377,11 @@ namespace PoggetCore {
                     header.originWindow = targetWin;
                     header.x1 = actualStartX + centeredOffsetX;
                     header.y1 = cursorYBase;
-                    header.y2 = cursorYBase + 35;
+                    header.y2 = cursorYBase + 43;
                     header.x2 = containerWidth - (actualStartX + centeredOffsetX);
                     header.title = currentSectionTitle;
                     outHeaders.push_back(header);
-                    cursorYBase += 50; // 35px height + 10px spacing
+                    cursorYBase += 58; // 43px height + 15px spacing
                 }
                 lastOrigin = targetWin;
             }
@@ -385,7 +393,7 @@ namespace PoggetCore {
             }
 
             icons[i].isCollapsed = false;
-            bool isTxt = (!isList && getConfig(targetWin).ShowTextPreview && (MatchWildcard(L"*.txt", icons[i].path) || MatchWildcard(L"*.md", icons[i].path)));
+            bool isTxt = (!isList && showTextPreviewFor(targetWin) && (MatchWildcard(L"*.txt", icons[i].path) || MatchWildcard(L"*.md", icons[i].path)));
             int itemSpan = isTxt ? 2 : 1;
 
             if (mainData.IconSpacingType == 1 && !isList) {
@@ -416,7 +424,7 @@ namespace PoggetCore {
                     int totalSpan = 0;
                     for (size_t idx : row.iconIndices) {
                         void* tWin = icons[idx].originWindow ? icons[idx].originWindow : containerWin;
-                        bool isTxt = (!isList && getConfig(tWin).ShowTextPreview && (MatchWildcard(L"*.txt", icons[idx].path) || MatchWildcard(L"*.md", icons[idx].path)));
+                        bool isTxt = (!isList && showTextPreviewFor(tWin) && (MatchWildcard(L"*.txt", icons[idx].path) || MatchWildcard(L"*.md", icons[idx].path)));
                         totalSpan += isTxt ? 2 : 1;
                     }
                     bool isRowFull = row.isFull || (totalSpan >= iconsPerRow);
@@ -425,7 +433,7 @@ namespace PoggetCore {
                     int numWidgets = 0;
                     for (size_t idx : row.iconIndices) {
                         void* tWin = icons[idx].originWindow ? icons[idx].originWindow : containerWin;
-                        bool isTxt = (!isList && getConfig(tWin).ShowTextPreview && (MatchWildcard(L"*.txt", icons[idx].path) || MatchWildcard(L"*.md", icons[idx].path)));
+                        bool isTxt = (!isList && showTextPreviewFor(tWin) && (MatchWildcard(L"*.txt", icons[idx].path) || MatchWildcard(L"*.md", icons[idx].path)));
                         if (isTxt) {
                             numWidgets++;
                             totalUnshrunkWidth += (iconSize * 2 + 12);
@@ -497,7 +505,7 @@ namespace PoggetCore {
 
                         for (size_t idx : row.iconIndices) {
                             void* tWin = icons[idx].originWindow ? icons[idx].originWindow : containerWin;
-                            bool isTxt = (!isList && getConfig(tWin).ShowTextPreview && (MatchWildcard(L"*.txt", icons[idx].path) || MatchWildcard(L"*.md", icons[idx].path)));
+                            bool isTxt = (!isList && showTextPreviewFor(tWin) && (MatchWildcard(L"*.txt", icons[idx].path) || MatchWildcard(L"*.md", icons[idx].path)));
                             if (isTxt) icons[idx].customWidth = static_cast<float>((iconSize * 2 + 12) + stretchPerWidget);
                             else icons[idx].customWidth = -1.0f;
                         }

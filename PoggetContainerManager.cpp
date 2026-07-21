@@ -31,6 +31,18 @@ namespace PoggetCore {
         return nullptr;
     }
 
+    std::shared_ptr<ContainerModel> PoggetContainerManager::GetMergedHostByColor(const std::wstring& colorKey) const {
+        if (colorKey.empty()) return nullptr;
+        std::lock_guard<std::mutex> lock(m_mutex);
+        for (const auto& pair : m_containers) {
+            const auto& model = pair.second;
+            if (model && model->IsMergedHost && model->MergedHostColor == colorKey) {
+                return model;
+            }
+        }
+        return nullptr;
+    }
+
     void PoggetContainerManager::RemoveContainer(const std::wstring& id) {
         std::lock_guard<std::mutex> lock(m_mutex);
         m_containers.erase(id);

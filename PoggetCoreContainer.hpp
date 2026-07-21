@@ -26,6 +26,11 @@ namespace PoggetCore {
         std::wstring title = L"Unnamed";
         bool IsMinimized = false;
         bool IsIntegrated = false;
+        // A merged host owns presentation state only. File items always belong
+        // to the member containers referenced by MergedHostId.
+        bool IsMergedHost = false;
+        std::wstring MergedHostColor;
+        std::wstring MergedHostId;
         bool UseTargetFolder = false;
         std::wstring TargetFolder = L"vui!NULL";
         bool IsCustomTarget = false;
@@ -49,6 +54,7 @@ namespace PoggetCore {
         int TagStyle = 0;
         int ListDetailType = 0;
         std::wstring fontFamily = L"Segoe UI";
+        float textSize = 10.0f;
         bool DisableLayoutAnimations = false;
 
         // 模式与状态标志
@@ -57,6 +63,7 @@ namespace PoggetCore {
         bool IsUpwardExpand = false;
         int TransparentFrameMode = 0;
         int AutoHideTitleBar = 0;
+        int QuickExpandCollapse = 1;
         int AutoFade = 0;
         bool AutoFadeDragStat = false;
         int FolderOpenMode = 0;

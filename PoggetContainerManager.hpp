@@ -28,6 +28,7 @@ namespace PoggetCore {
         std::shared_ptr<ContainerModel> CreateContainer(const std::wstring& id);
         void RegisterContainer(const std::wstring& id, std::shared_ptr<ContainerModel> model);
         std::shared_ptr<ContainerModel> GetContainer(const std::wstring& id) const;
+        std::shared_ptr<ContainerModel> GetMergedHostByColor(const std::wstring& colorKey) const;
         void RemoveContainer(const std::wstring& id);
         std::vector<std::shared_ptr<ContainerModel>> GetAllContainers() const;
         void Clear();
