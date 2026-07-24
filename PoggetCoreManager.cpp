@@ -110,10 +110,17 @@ namespace PoggetCore {
         if (mainData.IconSpacingType == 1) {
             actualStartX = (spacingMode == 0) ? 16 : ((spacingMode == 1) ? 24 : 32);
         }
-        int availableWidth = containerWidth - 2 * actualStartX;
+        int availableWidth = (std::max)(0, containerWidth - 2 * actualStartX);
         bool isList = mainData.IsListView;
 
         int gapX = gap + (spacingMode == 1 ? 16 : (spacingMode == 2 ? 36 : 0));
+        if (mainData.textSize > 12.0f && mainData.textSize < 100.0f) {
+            float scaleDiff = (mainData.textSize - 12.0f);
+            gapX += static_cast<int>(std::round(scaleDiff * 4.0f));
+        }
+        // 文本预览横跨两个标准图标单元；宽度必须包含两个单元之间的动态间隔，
+        // 才能保证它左右两侧与普通图标保持相同留白。
+        const int textWidgetWidth = iconSize * 2 + gapX;
         int gapY = gap + 15 + (spacingMode == 1 ? 20 : (spacingMode == 2 ? 45 : 0));
         int baseListStepY = (iconSize / 2) + 8;
         int listStepY = baseListStepY + (spacingMode == 1 ? 12 : (spacingMode == 2 ? 28 : 0));
@@ -254,7 +261,7 @@ namespace PoggetCore {
                     void* tWin = icons[idx].originWindow ? icons[idx].originWindow : containerWin;
                     bool isTxt = (showTextPreviewFor(tWin) && (MatchWildcard(L"*.txt", icons[idx].path) || MatchWildcard(L"*.md", icons[idx].path)));
                     if (isTxt) {
-                        int w_base = iconSize * 2 + 12;
+                        int w_base = textWidgetWidth;
                         int maxShrink = w_base / 6;
                         minRequiredWidth += (w_base - maxShrink);
                     } else {
@@ -343,6 +350,24 @@ namespace PoggetCore {
 
         int cursorX = 0;
         int cursorYBase = startY;
+
+        auto getAdjustedStep = [&](void* targetWin) -> int {
+            if (targetWin == nullptr) targetWin = containerWin;
+            CoreContainerConfig targetData = getConfig(targetWin);
+            float tSize = targetData.textSize;
+            int currentStep = isList ? listStepY : (iconSize + gapY);
+            if (tSize > 12.0f && tSize < 100.0f) {
+                float scaleDiff = (tSize - 12.0f);
+                if (isList) {
+                    currentStep += static_cast<int>(std::round(scaleDiff * 3.0f));
+                } else {
+                    // 与 VinaIcon 的实际文本预览增高保持一致，防止下一行侵入组件。
+                    currentStep += static_cast<int>(std::round(scaleDiff * 6.4f));
+                }
+            }
+            return currentStep;
+        };
+
         void* lastOrigin = nullptr;
         std::wstring currentSectionTitle = L"";
 
@@ -368,7 +393,7 @@ namespace PoggetCore {
             if (targetWin != lastOrigin || (isSearchManager && mainData.IsInInlineFolderView && !icons[i].sectionTitle.empty())) {
                 if (cursorX > 0) {
                     cursorX = 0;
-                    cursorYBase += isList ? listStepY : (iconSize + gapY);
+                    cursorYBase += getAdjustedStep(lastOrigin ? lastOrigin : containerWin);
                 }
                 currentSectionTitle = icons[i].sectionTitle.empty() ? targetData.title : icons[i].sectionTitle;
 
@@ -400,12 +425,14 @@ namespace PoggetCore {
                 bool needsWrap = (i > 0 && iconToRowMap[i] != iconToRowMap[i - 1]);
                 if (needsWrap && cursorX > 0) {
                     cursorX = 0;
-                    cursorYBase += (iconSize + gapY);
+                    void* prevWin = (i > 0 && icons[i - 1].originWindow) ? icons[i - 1].originWindow : containerWin;
+                    cursorYBase += getAdjustedStep(prevWin);
                 }
             } else {
                 if (cursorX + itemSpan > iconsPerRow && cursorX > 0) {
                     cursorX = 0;
-                    cursorYBase += isList ? listStepY : (iconSize + gapY);
+                    void* prevWin = (i > 0 && icons[i - 1].originWindow) ? icons[i - 1].originWindow : containerWin;
+                    cursorYBase += getAdjustedStep(prevWin);
                 }
             }
 
@@ -436,7 +463,7 @@ namespace PoggetCore {
                         bool isTxt = (!isList && showTextPreviewFor(tWin) && (MatchWildcard(L"*.txt", icons[idx].path) || MatchWildcard(L"*.md", icons[idx].path)));
                         if (isTxt) {
                             numWidgets++;
-                            totalUnshrunkWidth += (iconSize * 2 + 12);
+                            totalUnshrunkWidth += textWidgetWidth;
                         } else {
                             totalUnshrunkWidth += iconSize;
                         }
@@ -460,12 +487,12 @@ namespace PoggetCore {
                             }
                             int diff = requiredSpace - totalItemsWidth;
                             if (diff > 0) {
-                                int maxTotalStretch = numWidgets * ((iconSize * 2 + 12) / 4);
+                                int maxTotalStretch = numWidgets * (textWidgetWidth / 4);
                                 int actualTotalStretch = (diff < maxTotalStretch) ? diff : maxTotalStretch;
                                 stretchPerWidget = actualTotalStretch / numWidgets;
                                 totalItemsWidth += actualTotalStretch;
                             } else if (diff < 0) {
-                                int maxTotalShrink = numWidgets * ((iconSize * 2 + 12) / 6);
+                                int maxTotalShrink = numWidgets * (textWidgetWidth / 6);
                                 int actualTotalShrink = (-diff < maxTotalShrink) ? -diff : maxTotalShrink;
                                 stretchPerWidget = -actualTotalShrink / numWidgets;
                                 totalItemsWidth -= actualTotalShrink;
@@ -506,22 +533,31 @@ namespace PoggetCore {
                         for (size_t idx : row.iconIndices) {
                             void* tWin = icons[idx].originWindow ? icons[idx].originWindow : containerWin;
                             bool isTxt = (!isList && showTextPreviewFor(tWin) && (MatchWildcard(L"*.txt", icons[idx].path) || MatchWildcard(L"*.md", icons[idx].path)));
-                            if (isTxt) icons[idx].customWidth = static_cast<float>((iconSize * 2 + 12) + stretchPerWidget);
+                            if (isTxt) icons[idx].customWidth = static_cast<float>(textWidgetWidth + stretchPerWidget);
                             else icons[idx].customWidth = -1.0f;
                         }
                     } else {
                         rowGapX = standardRowGapX;
                         rowCenteredOffsetX = standardRowCenteredOffsetX;
-                        for (size_t idx : row.iconIndices) icons[idx].customWidth = -1.0f;
+                        for (size_t idx : row.iconIndices) {
+                            void* tWin = icons[idx].originWindow ? icons[idx].originWindow : containerWin;
+                            bool isTxt = !isList && showTextPreviewFor(tWin) &&
+                                (MatchWildcard(L"*.txt", icons[idx].path) || MatchWildcard(L"*.md", icons[idx].path));
+                            icons[idx].customWidth = isTxt ? static_cast<float>(textWidgetWidth) : -1.0f;
+                        }
                     }
                 }
                 rowAccumulatedX = static_cast<float>(actualStartX) + rowCenteredOffsetX;
             }
 
+            if (isTxt && icons[i].customWidth <= 0.0f) {
+                icons[i].customWidth = static_cast<float>(textWidgetWidth);
+            }
+
             int newX;
             if (mainData.IconSpacingType == 1 && !isList) {
                 newX = static_cast<int>(std::round(rowAccumulatedX));
-                rowAccumulatedX += (icons[i].customWidth > 0.0f ? icons[i].customWidth : static_cast<float>(isTxt ? (iconSize * 2 + 12) : iconSize)) + rowGapX;
+                rowAccumulatedX += (icons[i].customWidth > 0.0f ? icons[i].customWidth : static_cast<float>(isTxt ? textWidgetWidth : iconSize)) + rowGapX;
             } else {
                 newX = actualStartX + centeredOffsetX + (isList ? 0 : cursorX * (iconSize + gapX));
             }
@@ -534,8 +570,113 @@ namespace PoggetCore {
                 cursorX += itemSpan;
                 if (cursorX >= iconsPerRow) {
                     cursorX = 0;
-                    cursorYBase += isList ? listStepY : (iconSize + gapY);
+                    cursorYBase += getAdjustedStep(targetWin);
                 }
+            }
+        }
+
+        // Split interaction cells at adjacent item/row midpoints. Keep 4px
+        // horizontally and 2px vertically without changing rendered positions.
+        struct InteractionRow {
+            float top = 0.0f;
+            float bottom = 0.0f;
+            std::vector<size_t> iconIndices;
+        };
+
+        std::map<int, InteractionRow> interactionRows;
+        auto getItemWidth = [&](size_t index) {
+            if (icons[index].customWidth > 0.0f) return icons[index].customWidth;
+            void* targetWin = icons[index].originWindow ? icons[index].originWindow : containerWin;
+            bool isTxt = !isList && showTextPreviewFor(targetWin) &&
+                (MatchWildcard(L"*.txt", icons[index].path) || MatchWildcard(L"*.md", icons[index].path));
+            return static_cast<float>(isTxt ? textWidgetWidth : iconSize);
+        };
+        auto getItemHeight = [&](size_t index) {
+            if (isList) return iconSize / 2.0f + 6.0f;
+            void* targetWin = icons[index].originWindow ? icons[index].originWindow : containerWin;
+            const bool isTxt = showTextPreviewFor(targetWin) &&
+                (MatchWildcard(L"*.txt", icons[index].path) || MatchWildcard(L"*.md", icons[index].path));
+            float height = static_cast<float>(iconSize);
+            const float textSize = getConfig(targetWin).textSize;
+            if (isTxt && textSize > 12.0f && textSize < 100.0f) {
+                height += (textSize - 12.0f) * 6.4f;
+            }
+            return height;
+        };
+
+        for (size_t i = 0; i < icons.size(); ++i) {
+            auto& icon = icons[i];
+            icon.hasInteractionClip = false;
+            if (!icon.isVisible || icon.isCollapsed || icon.targetX < -50.0f || icon.targetY < -50.0f) continue;
+
+            int rowKey = static_cast<int>(std::lround(icon.targetY));
+            auto& row = interactionRows[rowKey];
+            const float itemHeight = getItemHeight(i);
+            if (row.iconIndices.empty()) {
+                row.top = icon.targetY;
+                row.bottom = icon.targetY + itemHeight;
+            } else {
+                row.top = (std::min)(row.top, icon.targetY);
+                row.bottom = (std::max)(row.bottom, icon.targetY + itemHeight);
+            }
+            row.iconIndices.push_back(i);
+
+            icon.interactionClipLeftOffset = 1.0f - icon.targetX;
+            icon.interactionClipTopOffset = -100000.0f;
+            icon.interactionClipRightOffset =
+                (std::max)(1.0f, static_cast<float>(containerWidth) - 1.0f) - icon.targetX;
+            icon.interactionClipBottomOffset = 100000.0f;
+            icon.hasInteractionClip = true;
+        }
+
+        for (auto& rowEntry : interactionRows) {
+            auto& row = rowEntry.second;
+            std::sort(row.iconIndices.begin(), row.iconIndices.end(), [&](size_t lhs, size_t rhs) {
+                return icons[lhs].targetX < icons[rhs].targetX;
+            });
+
+            for (size_t pos = 1; pos < row.iconIndices.size(); ++pos) {
+                size_t leftIndex = row.iconIndices[pos - 1];
+                size_t rightIndex = row.iconIndices[pos];
+                float leftItemRight = icons[leftIndex].targetX + getItemWidth(leftIndex);
+                float rightItemLeft = icons[rightIndex].targetX;
+                float separator = (leftItemRight + rightItemLeft) * 0.5f;
+
+                if (leftItemRight > rightItemLeft) {
+                    float leftCenter = icons[leftIndex].targetX + getItemWidth(leftIndex) * 0.5f;
+                    float rightCenter = icons[rightIndex].targetX + getItemWidth(rightIndex) * 0.5f;
+                    separator = (leftCenter + rightCenter) * 0.5f;
+                }
+
+                icons[leftIndex].interactionClipRightOffset =
+                    (std::min)(icons[leftIndex].interactionClipRightOffset,
+                        separator - 2.0f - icons[leftIndex].targetX);
+                icons[rightIndex].interactionClipLeftOffset =
+                    (std::max)(icons[rightIndex].interactionClipLeftOffset,
+                        separator + 2.0f - icons[rightIndex].targetX);
+            }
+        }
+
+        std::vector<InteractionRow*> orderedRows;
+        orderedRows.reserve(interactionRows.size());
+        for (auto& rowEntry : interactionRows) orderedRows.push_back(&rowEntry.second);
+        std::sort(orderedRows.begin(), orderedRows.end(), [](const InteractionRow* lhs, const InteractionRow* rhs) {
+            return lhs->top < rhs->top;
+        });
+
+        for (size_t rowIndex = 1; rowIndex < orderedRows.size(); ++rowIndex) {
+            InteractionRow& upper = *orderedRows[rowIndex - 1];
+            InteractionRow& lower = *orderedRows[rowIndex];
+            float separator = (upper.bottom + lower.top) * 0.5f;
+            for (size_t index : upper.iconIndices) {
+                icons[index].interactionClipBottomOffset =
+                    (std::min)(icons[index].interactionClipBottomOffset,
+                        separator + 1.0f - icons[index].targetY);
+            }
+            for (size_t index : lower.iconIndices) {
+                icons[index].interactionClipTopOffset =
+                    (std::max)(icons[index].interactionClipTopOffset,
+                        separator + 1.0f - icons[index].targetY);
             }
         }
     }

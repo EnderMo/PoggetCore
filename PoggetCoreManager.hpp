@@ -29,6 +29,7 @@ namespace PoggetCore {
         bool IsSectionCollapsed = false;
         bool ShowTextPreview = true;
         bool ShowMediaPreview = true;
+        float textSize = 10.0f;
     };
 
     struct CoreIconLayoutData {
@@ -49,6 +50,11 @@ namespace PoggetCore {
         float targetX = -100.0f;
         float targetY = -100.0f;
         float customWidth = -1.0f;
+        float interactionClipLeftOffset = 0.0f;
+        float interactionClipTopOffset = 0.0f;
+        float interactionClipRightOffset = 0.0f;
+        float interactionClipBottomOffset = 0.0f;
+        bool hasInteractionClip = false;
         bool isCollapsed = false;
         bool isVisible = true;
     };

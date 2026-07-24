@@ -1,5 +1,6 @@
 #include "PoggetMetaManager.hpp"
 #include <chrono>
+#include <unordered_set>
 
 #ifdef _WIN32
 #include <windows.h>
@@ -7,6 +8,62 @@
 #endif
 
 namespace PoggetMeta {
+
+    static bool RestoreReplacedDestinationWithoutDataLoss(
+        AsyncFileTask& task,
+        IPoggetMetaListener* listener) {
+        if (task.replacedBackupPath.empty()) return true;
+
+        const std::filesystem::path backup = task.replacedBackupPath;
+        const std::filesystem::path destination = task.dest;
+        if (!PoggetCore::HistoryFileSystem::Exists(backup)) {
+            if (listener) {
+                listener->OnLog(L"ERROR",
+                    L"Replacement backup is missing: " + backup.wstring());
+            }
+            return false;
+        }
+
+        if (PoggetCore::HistoryFileSystem::Exists(destination)) {
+            auto recoveryRoot = destination.parent_path();
+            if (recoveryRoot.empty()) {
+                std::error_code ec;
+                recoveryRoot = std::filesystem::current_path(ec);
+            }
+            const auto recovery = PoggetCore::HistoryFileSystem::MakeUniquePath(
+                recoveryRoot, destination, L"pogget-recovered", true);
+            if (!recovery.empty()) {
+                auto preserveResult = PoggetCore::HistoryFileSystem::MovePath(backup, recovery);
+                if (preserveResult) {
+                    task.replacedBackupPath = recovery.wstring();
+                    if (listener) {
+                        listener->OnLog(L"ERROR",
+                            L"Destination became occupied during rollback. The replaced item was "
+                            L"preserved at: " + recovery.wstring());
+                    }
+                    return false;
+                }
+            }
+            if (listener) {
+                listener->OnLog(L"ERROR",
+                    L"Rollback stopped because the destination is occupied. No existing path was "
+                    L"deleted; replacement backup remains at: " + backup.wstring());
+            }
+            return false;
+        }
+
+        auto restoreResult = PoggetCore::HistoryFileSystem::MovePath(backup, destination);
+        if (restoreResult) {
+            task.replacedBackupPath.clear();
+            return true;
+        }
+        if (listener) {
+            listener->OnLog(L"ERROR",
+                L"Failed to restore overwritten destination. Backup remains at: " +
+                backup.wstring());
+        }
+        return false;
+    }
 
     PoggetMetaManager& PoggetMetaManager::GetInstance() {
         static PoggetMetaManager instance;
@@ -54,10 +111,14 @@ namespace PoggetMeta {
     }
 #endif
 
-    void PoggetMetaManager::PerformAsyncCopy(const std::vector<AsyncFileTask>& pasteQueue, int batchCollisionChoice) {
+    void PoggetMetaManager::PerformAsyncCopy(
+        const std::vector<AsyncFileTask>& pasteQueue,
+        int batchCollisionChoice,
+        bool verifyContent) {
         std::vector<AsyncFileTask> adjustedBatch;
         for (auto t : pasteQueue) {
             t.batchCollisionChoice = batchCollisionChoice;
+            t.verifyContent = verifyContent;
             t.opType = t.isMenuPaste ? MetaOpType::Move : MetaOpType::Copy;
             adjustedBatch.push_back(t);
         }
@@ -66,12 +127,74 @@ namespace PoggetMeta {
 
     void PoggetMetaManager::SubmitTaskBatch(const std::vector<AsyncFileTask>& batch) {
         if (batch.empty()) return;
-        
+
+        std::vector<AsyncFileTask> prepared = batch;
+        std::wstring batchFailure;
+        std::unordered_set<std::wstring> sources;
+        std::unordered_set<std::wstring> destinations;
+        std::vector<std::filesystem::path> transferSources;
+
+        for (const auto& task : prepared) {
+            const bool isTransfer = task.opType == MetaOpType::Copy ||
+                task.opType == MetaOpType::Move || task.opType == MetaOpType::Rename;
+            if (!isTransfer) continue;
+            if (task.src.empty() || task.dest.empty()) {
+                batchFailure = L"batch contains an empty transfer path";
+                break;
+            }
+
+            const auto sourceKey = PoggetCore::HistoryFileSystem::ComparablePath(task.src);
+            const auto destinationKey = PoggetCore::HistoryFileSystem::ComparablePath(task.dest);
+            if (sourceKey == destinationKey) continue;
+            if (!sources.insert(sourceKey).second) {
+                batchFailure = L"batch contains the same source more than once: " + task.src;
+                break;
+            }
+            if (!destinations.insert(destinationKey).second) {
+                batchFailure = L"batch contains multiple items for the same destination: " + task.dest;
+                break;
+            }
+            transferSources.emplace_back(task.src);
+        }
+
+        if (batchFailure.empty()) {
+            for (size_t left = 0; left < transferSources.size() && batchFailure.empty(); ++left) {
+                for (size_t right = left + 1; right < transferSources.size(); ++right) {
+                    if (PoggetCore::HistoryFileSystem::IsPathInside(
+                            transferSources[left], transferSources[right]) ||
+                        PoggetCore::HistoryFileSystem::IsPathInside(
+                            transferSources[right], transferSources[left])) {
+                        batchFailure = L"batch contains overlapping parent and child sources";
+                        break;
+                    }
+                }
+            }
+        }
+
+        if (batchFailure.empty()) {
+            for (const auto& task : prepared) {
+                const bool isTransfer = task.opType == MetaOpType::Copy ||
+                    task.opType == MetaOpType::Move || task.opType == MetaOpType::Rename;
+                if (!isTransfer) continue;
+                const auto sourceKey = PoggetCore::HistoryFileSystem::ComparablePath(task.src);
+                const auto destinationKey = PoggetCore::HistoryFileSystem::ComparablePath(task.dest);
+                if (sourceKey != destinationKey && sources.count(destinationKey) != 0) {
+                    batchFailure = L"batch destination overlaps another source: " + task.dest;
+                    break;
+                }
+            }
+        }
+
+        if (!batchFailure.empty()) {
+            for (auto& task : prepared) task.preflightError = batchFailure;
+        }
+
         uint64_t newBatchId = ++m_currentBatchId;
         {
             std::lock_guard<std::mutex> lock(m_queueMutex);
-            for (auto t : batch) {
+            for (auto t : prepared) {
                 t.batchId = newBatchId;
+                if (!t.listener) t.listener = m_listener.load();
                 m_taskQueue.push(t);
             }
         }
@@ -98,7 +221,10 @@ namespace PoggetMeta {
                 m_isCopying = true;
             }
 
-            if (m_cancelCopy) continue; // Skip remaining tasks of cancelled batch
+            IPoggetMetaListener* taskListener = task.listener;
+            m_activeListener = taskListener;
+
+            const bool cancelled = m_cancelCopy.load();
 
             SetCurrentFileName(std::filesystem::path(task.src).filename().wstring());
             SetCopyProgress(0.0f);
@@ -111,9 +237,9 @@ namespace PoggetMeta {
 #endif
             if (currentTick - m_lastTick > 48) {
                 m_lastTick = currentTick;
-                if (m_listener) {
-                    m_listener.load()->OnRunOnMainThread([this]() {
-                        if (m_listener) m_listener.load()->OnRefreshUI();
+                if (taskListener) {
+                    taskListener->OnRunOnMainThread([taskListener]() {
+                        taskListener->OnRefreshUI();
                     });
                 }
             }
@@ -122,124 +248,145 @@ namespace PoggetMeta {
             bool success = false;
 
             try {
+                if (!task.preflightError.empty()) {
+                    if (taskListener) taskListener->OnLog(L"ERROR", task.preflightError);
+                    success = false;
+                }
+                else if (cancelled) {
+                    success = false;
+                }
+                else {
+                std::filesystem::path replacedBackup;
+                if (task.batchCollisionChoice == 1 &&
+                    !task.dest.empty() &&
+                    PoggetCore::HistoryFileSystem::ComparablePath(task.src) !=
+                        PoggetCore::HistoryFileSystem::ComparablePath(task.dest) &&
+                    PoggetCore::HistoryFileSystem::Exists(task.dest)) {
+                    std::filesystem::path backupRoot = task.historyBackupRoot;
+                    if (backupRoot.empty()) {
+                        backupRoot = std::filesystem::temp_directory_path(ec) / L"PoggetUndo";
+                    }
+                    auto backupResult = PoggetCore::HistoryFileSystem::BackupDestination(
+                        task.dest, backupRoot, replacedBackup);
+                    if (!backupResult) {
+                        throw std::filesystem::filesystem_error(
+                            "Unable to back up overwritten destination",
+                            task.dest,
+                            backupResult.error);
+                    }
+                    task.replacedBackupPath = replacedBackup.wstring();
+                }
+
                 // Execute cross-platform file operation
                 if (task.opType == MetaOpType::Move) {
-                if (task.batchCollisionChoice == 1 && std::filesystem::exists(task.dest)) {
-                    std::filesystem::remove(task.dest, ec);
-                }
-                std::filesystem::rename(task.src, task.dest, ec);
-                if (!ec) {
-                    success = true;
-                } else {
-                    if (std::filesystem::is_directory(task.src, ec)) {
-                        SetCopyProgress(0.5f);
-                        std::filesystem::copy(task.src, task.dest, std::filesystem::copy_options::overwrite_existing | std::filesystem::copy_options::recursive, ec);
-                        if (!ec) {
-                            std::filesystem::remove_all(task.src, ec);
-                            success = true;
-                        }
-                    } else {
-#ifdef _WIN32
-                        BOOL bCancel = FALSE;
-                        if (CopyFileExW(task.src.c_str(), task.dest.c_str(), MetaCopyProgressRoutine, this, &bCancel, 0)) {
-                            std::filesystem::remove(task.src, ec);
-                            success = true;
-                        }
-#else
-                        std::filesystem::copy(task.src, task.dest, std::filesystem::copy_options::overwrite_existing, ec);
-                        if (!ec) {
-                            std::filesystem::remove(task.src, ec);
-                            success = true;
-                        }
-#endif
+                    auto result = PoggetCore::HistoryFileSystem::MovePath(
+                        task.src, task.dest, task.verifyContent);
+                    success = static_cast<bool>(result);
+                    if (success && !result.context.empty() && taskListener) {
+                        taskListener->OnLog(L"WARNING", result.context);
                     }
-                }
             } else if (task.opType == MetaOpType::Copy) {
-                if (std::filesystem::is_directory(task.src, ec)) {
-                    SetCopyProgress(0.5f);
-                    std::filesystem::copy(task.src, task.dest, std::filesystem::copy_options::overwrite_existing | std::filesystem::copy_options::recursive, ec);
-                    success = !ec;
-                } else {
-#ifdef _WIN32
-                    BOOL bCancel = FALSE;
-                    success = CopyFileExW(task.src.c_str(), task.dest.c_str(), MetaCopyProgressRoutine, this, &bCancel, 0);
-#else
-                    std::filesystem::copy(task.src, task.dest, std::filesystem::copy_options::overwrite_existing, ec);
-                    success = !ec;
-#endif
-                }
+                SetCopyProgress(0.5f);
+                auto result = PoggetCore::HistoryFileSystem::CopyPath(
+                    task.src, task.dest, task.verifyContent);
+                success = static_cast<bool>(result);
             } else if (task.opType == MetaOpType::Rename) {
-                if (task.batchCollisionChoice == 1 && std::filesystem::exists(task.dest)) {
-                    std::filesystem::remove(task.dest, ec);
+                auto result = PoggetCore::HistoryFileSystem::MovePath(
+                    task.src, task.dest, task.verifyContent);
+                success = static_cast<bool>(result);
+                if (success && !result.context.empty() && taskListener) {
+                    taskListener->OnLog(L"WARNING", result.context);
                 }
-                std::filesystem::rename(task.src, task.dest, ec);
-                success = !ec;
             } else if (task.opType == MetaOpType::Delete) {
-                if (std::filesystem::is_directory(task.src, ec)) {
-                    std::filesystem::remove_all(task.src, ec);
-                } else {
-                    std::filesystem::remove(task.src, ec);
-                }
-                success = !ec;
+                auto result = PoggetCore::HistoryFileSystem::RemovePath(task.src);
+                success = static_cast<bool>(result);
             } else if (task.opType == MetaOpType::Recycle) {
 #ifdef _WIN32
-                std::wstring doubleNullStr = task.src + L"\0";
+                std::wstring doubleNullStr = task.src;
+                doubleNullStr.push_back(L'\0');
+                doubleNullStr.push_back(L'\0');
                 SHFILEOPSTRUCTW fileOp = {0};
                 fileOp.wFunc = FO_DELETE;
                 fileOp.pFrom = doubleNullStr.c_str();
                 fileOp.fFlags = FOF_ALLOWUNDO | FOF_NOCONFIRMATION | FOF_SILENT | FOF_NOERRORUI;
                 int res = SHFileOperationW(&fileOp);
-                success = (res == 0);
+                success = (res == 0 && !fileOp.fAnyOperationsAborted &&
+                    !PoggetCore::HistoryFileSystem::Exists(task.src));
 #else
-                if (std::filesystem::is_directory(task.src, ec)) std::filesystem::remove_all(task.src, ec);
-                else std::filesystem::remove(task.src, ec);
-                success = !ec;
+                auto result = PoggetCore::HistoryFileSystem::RemovePath(task.src);
+                success = static_cast<bool>(result);
 #endif
             }
 
+                if (!success && !task.replacedBackupPath.empty() &&
+                    PoggetCore::HistoryFileSystem::Exists(task.replacedBackupPath)) {
+                    RestoreReplacedDestinationWithoutDataLoss(task, taskListener);
+                }
+                }
+
                         } catch (const std::exception& e) {
-                if (m_listener) {
+                RestoreReplacedDestinationWithoutDataLoss(task, taskListener);
+                if (taskListener) {
                     std::string msg = e.what();
-                    m_listener.load()->OnLog(L"ERROR", L"Exception during async file task: " + std::wstring(msg.begin(), msg.end()));
+                    taskListener->OnLog(L"ERROR", L"Exception during async file task: " + std::wstring(msg.begin(), msg.end()));
                 }
                 success = false;
             } catch (...) {
-                if (m_listener) m_listener.load()->OnLog(L"ERROR", L"Unknown exception during async file task.");
+                RestoreReplacedDestinationWithoutDataLoss(task, taskListener);
+                if (taskListener) taskListener->OnLog(L"ERROR", L"Unknown exception during async file task.");
                 success = false;
             }
 
             if (success) {
-                if (m_listener) {
-                    m_listener.load()->OnRunOnMainThread([this, task]() {
+                auto successCallback = [taskListener, task]() {
                         if (task.onSuccess) task.onSuccess();
-                        if (m_listener) m_listener.load()->OnFilePasteSuccess(task);
-                    });
+                        if (task.notifyListener && taskListener) {
+                            taskListener->OnFilePasteSuccess(task);
+                        }
+                    };
+                if (task.dispatchToMainThread) {
+                    task.dispatchToMainThread(std::move(successCallback));
+                }
+                else if (taskListener) {
+                    taskListener->OnRunOnMainThread(std::move(successCallback));
                 }
             } else {
-                if (m_listener) {
-                    m_listener.load()->OnLog(L"ERROR", L"Failed async file task: " + task.src);
-                    m_listener.load()->OnRunOnMainThread([this, task]() {
-                        if (task.onError) task.onError();
-                        if (m_listener) m_listener.load()->OnFilePasteError(task);
-                    });
+                auto errorCallback = [taskListener, task]() {
+                    if (task.onError) task.onError();
+                    if (task.notifyListener && taskListener) {
+                        taskListener->OnFilePasteError(task);
+                    }
+                };
+                if (taskListener) {
+                    taskListener->OnLog(L"ERROR", L"Failed async file task: " + task.src);
+                }
+                if (task.dispatchToMainThread) {
+                    task.dispatchToMainThread(std::move(errorCallback));
+                }
+                else if (taskListener) {
+                    taskListener->OnRunOnMainThread(std::move(errorCallback));
                 }
             }
 
-            // Check if queue empty -> End of Batch
+            // Complete each batch independently, even if another batch is queued.
             bool isQueueEmpty = false;
+            bool isBatchComplete = false;
             {
                 std::lock_guard<std::mutex> qlock(m_queueMutex);
                 isQueueEmpty = m_taskQueue.empty();
+                isBatchComplete = isQueueEmpty ||
+                    m_taskQueue.front().batchId != task.batchId;
             }
 
-            if (isQueueEmpty) {
-                m_isCopying = false;
-                if (m_listener) {
-                    m_listener.load()->OnRunOnMainThread([this]() {
-                        if (m_listener) m_listener.load()->OnCopyAllComplete();
+            if (isBatchComplete) {
+                if (isQueueEmpty) m_isCopying = false;
+                if (task.notifyListener && taskListener) {
+                    taskListener->OnRunOnMainThread([taskListener]() {
+                        taskListener->OnCopyAllComplete();
                     });
                 }
             }
+            m_activeListener = nullptr;
         }
     }
 }

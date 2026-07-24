@@ -11,6 +11,7 @@
 #include <filesystem>
 #include "PoggetMetaTypes.hpp"
 #include "IPoggetMetaListener.hpp"
+#include "../PoggetHistoryFileSystem.hpp"
 
 namespace PoggetMeta {
 
@@ -21,7 +22,10 @@ namespace PoggetMeta {
         ~PoggetMetaManager();
 
         void SetListener(IPoggetMetaListener* listener) { m_listener = listener; }
-        IPoggetMetaListener* GetListener() const { return m_listener; }
+        IPoggetMetaListener* GetListener() const {
+            auto* active = m_activeListener.load();
+            return active ? active : m_listener.load();
+        }
 
         bool IsCopying() const { return m_isCopying.load(); }
         void CancelCopy() { m_cancelCopy = true; } 
@@ -43,7 +47,10 @@ namespace PoggetMeta {
         void SetLastTick(unsigned long tick) { m_lastTick = tick; }
 
         // Legacy compatibility
-        void PerformAsyncCopy(const std::vector<AsyncFileTask>& pasteQueue, int batchCollisionChoice);
+        void PerformAsyncCopy(
+            const std::vector<AsyncFileTask>& pasteQueue,
+            int batchCollisionChoice,
+            bool verifyContent = false);
         
         // Unified Queue API
         void SubmitTaskBatch(const std::vector<AsyncFileTask>& batch);
@@ -53,6 +60,7 @@ namespace PoggetMeta {
         void WorkerLoop();
 
         std::atomic<IPoggetMetaListener*> m_listener = nullptr;
+        std::atomic<IPoggetMetaListener*> m_activeListener = nullptr;
         
         std::queue<AsyncFileTask> m_taskQueue;
         std::mutex m_queueMutex;

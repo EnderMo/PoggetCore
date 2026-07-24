@@ -70,6 +70,7 @@ namespace PoggetCore {
         proxy[L"AutoHideTitleBar"] = model.AutoHideTitleBar;
         proxy[L"QuickExpandCollapse"] = model.QuickExpandCollapse;
         proxy[L"AutoFade"] = model.AutoFade;
+        proxy[L"FadeOutSwitch"] = model.FadeOutSwitch;
         proxy[L"AutoFadeDragStat"] = model.AutoFadeDragStat;
         proxy[L"FolderOpenMode"] = model.FolderOpenMode;
         proxy[L"SwipeUpSearchEnabled"] = model.SwipeUpSearchEnabled;
@@ -127,6 +128,7 @@ namespace PoggetCore {
         outModel.AutoHideTitleBar = proxy[L"AutoHideTitleBar"].get<int>(0);
         outModel.QuickExpandCollapse = proxy[L"QuickExpandCollapse"].get<int>(1);
         outModel.AutoFade = proxy[L"AutoFade"].get<int>(0);
+        outModel.FadeOutSwitch = proxy[L"FadeOutSwitch"].get<bool>(false);
         outModel.AutoFadeDragStat = proxy[L"AutoFadeDragStat"].get<bool>(false);
         outModel.FolderOpenMode = proxy[L"FolderOpenMode"].get<int>(0);
         outModel.SwipeUpSearchEnabled = proxy[L"SwipeUpSearchEnabled"].get<bool>(true);

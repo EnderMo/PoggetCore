@@ -14,7 +14,9 @@
 #include <type_traits> 
 #include <cstring> 
 #include <any> 
+#include <atomic>
 #include <filesystem>
+#include <mutex>
 
 #ifdef _WIN32
 #include <Windows.h>
@@ -94,6 +96,7 @@ private:
     // 根对象列表也改为有序 Map，以保持多个根对象的顺序
     tsl::ordered_map<std::wstring, VinaStorageObjectMap> root_objects_;
     bool loaded_ = false; // Add a flag to track if file is loaded
+    std::mutex io_mutex_;
 
     // ... (convertBasicObjectToMap, isEscapedPath, hasMultipleConsecutiveBackslashes, populateVinaObject 保持不变) ...
     // 为了保持您提供的代码的完整性和结构，我将这些函数体粘贴在下面
@@ -380,6 +383,7 @@ public:
     }
 
     void Load(const std::wstring& filename) {
+        std::lock_guard<std::mutex> io_lock(io_mutex_);
         filename_ = filename;
         loaded_ = false;
 
@@ -426,7 +430,17 @@ public:
                 
                 // Copy backup back to primary file to fix it
 #ifdef _WIN32
-                CopyFileW(backup_filename.c_str(), filename.c_str(), FALSE);
+                static std::atomic<unsigned long long> restore_sequence{ 0 };
+                const std::wstring restore_temp = filename + L".restore." +
+                    std::to_wstring(GetCurrentProcessId()) + L"." +
+                    std::to_wstring(GetTickCount64()) + L"." +
+                    std::to_wstring(++restore_sequence);
+                if (CopyFileW(backup_filename.c_str(), restore_temp.c_str(), TRUE)) {
+                    if (!MoveFileExW(restore_temp.c_str(), filename.c_str(),
+                            MOVEFILE_REPLACE_EXISTING | MOVEFILE_WRITE_THROUGH)) {
+                        DeleteFileW(restore_temp.c_str());
+                    }
+                }
 #else
                 std::ifstream src(backup_filename, std::ios::binary);
                 std::ofstream dst(filename, std::ios::binary);
@@ -442,7 +456,17 @@ public:
         
         std::wstring corrupted_filename = filename + L".corrupted";
 #ifdef _WIN32
-        MoveFileExW(filename.c_str(), corrupted_filename.c_str(), MOVEFILE_REPLACE_EXISTING);
+        static std::atomic<unsigned long long> corrupted_sequence{ 0 };
+        if (GetFileAttributesW(corrupted_filename.c_str()) != INVALID_FILE_ATTRIBUTES) {
+            corrupted_filename += L"." + std::to_wstring(GetTickCount64()) + L"." +
+                std::to_wstring(++corrupted_sequence);
+        }
+        if (!MoveFileExW(filename.c_str(), corrupted_filename.c_str(), MOVEFILE_WRITE_THROUGH)) {
+            loaded_ = false;
+            throw std::runtime_error(
+                "Could not preserve corrupted storage before reset (Error code: " +
+                std::to_string(GetLastError()) + ")");
+        }
 #else
         std::rename(WStringToUTF8(filename).c_str(), WStringToUTF8(corrupted_filename).c_str());
 #endif
@@ -458,6 +482,7 @@ public:
 
     // Save
     void Save() {
+        std::lock_guard<std::mutex> io_lock(io_mutex_);
         if (!loaded_ || filename_.empty()) {
             throw std::runtime_error("Cannot save: No file is currently loaded or filename is not set.");
         }
@@ -475,14 +500,38 @@ public:
 #ifdef _WIN32
         std::string utf8_content = WStringToUTF8(wcontent);
 
-        std::wstring temp_filename = filename_ + L".tmp";
+        static std::atomic<unsigned long long> save_sequence{ 0 };
+        std::wstring temp_filename = filename_ + L".tmp." +
+            std::to_wstring(GetCurrentProcessId()) + L"." +
+            std::to_wstring(GetTickCount64()) + L"." +
+            std::to_wstring(++save_sequence);
         std::wstring backup_filename = backup_path_.empty() ? (filename_ + L".bak") : backup_path_;
+
+        std::error_code primary_path_ec;
+        std::error_code backup_path_ec;
+        auto primary_path = std::filesystem::absolute(filename_, primary_path_ec)
+            .lexically_normal().wstring();
+        auto backup_path = std::filesystem::absolute(backup_filename, backup_path_ec)
+            .lexically_normal().wstring();
+#ifdef _WIN32
+        std::transform(primary_path.begin(), primary_path.end(), primary_path.begin(), ::towlower);
+        std::transform(backup_path.begin(), backup_path.end(), backup_path.begin(), ::towlower);
+#endif
+        if (!primary_path_ec && !backup_path_ec && primary_path == backup_path) {
+            throw std::runtime_error("Storage primary and backup paths must be different.");
+        }
 
         // 1. Ensure parent directory of backup_filename exists
         {
             std::filesystem::path p(backup_filename);
             std::error_code ec;
-            std::filesystem::create_directories(p.parent_path(), ec);
+            if (!p.parent_path().empty()) {
+                std::filesystem::create_directories(p.parent_path(), ec);
+                if (ec) {
+                    throw std::runtime_error("Could not create storage backup directory: " +
+                        WStringToUTF8(p.parent_path().wstring()));
+                }
+            }
         }
 
         // 2. Write content to temp file
@@ -511,8 +560,20 @@ public:
             NULL
         );
         if (hFile != INVALID_HANDLE_VALUE) {
-            FlushFileBuffers(hFile);
+            if (!FlushFileBuffers(hFile)) {
+                const DWORD flush_error = GetLastError();
+                CloseHandle(hFile);
+                DeleteFileW(temp_filename.c_str());
+                throw std::runtime_error("Could not flush storage temp file (Error code: " +
+                    std::to_string(flush_error) + ")");
+            }
             CloseHandle(hFile);
+        }
+        else {
+            const DWORD open_error = GetLastError();
+            DeleteFileW(temp_filename.c_str());
+            throw std::runtime_error("Could not reopen storage temp file for flush (Error code: " +
+                std::to_string(open_error) + ")");
         }
 
         // 4. Atomically replace the original file with retry loop for anti-virus/sync locks
@@ -520,6 +581,7 @@ public:
         bool original_exists = (dwAttrs != INVALID_FILE_ATTRIBUTES && !(dwAttrs & FILE_ATTRIBUTE_DIRECTORY));
 
         bool replace_success = false;
+        DWORD atomic_error = ERROR_SUCCESS;
         int max_retries = 5;
         for (int i = 0; i < max_retries; ++i) {
             if (original_exists) {
@@ -537,6 +599,7 @@ public:
             }
             
             DWORD err = GetLastError();
+            atomic_error = err;
             // If it's a sharing violation or access denied, sleep and retry
             if (err == ERROR_SHARING_VIOLATION || err == ERROR_ACCESS_DENIED) {
                 Sleep(20 + i * 20); // Exponential backoff: 20ms, 40ms, 60ms, 80ms, 100ms
@@ -548,11 +611,30 @@ public:
 
         // 5. Fallback if ReplaceFileW / MoveFileExW failed
         if (!replace_success) {
-            std::wcerr << L"Warning: Atomic save failed (error " << GetLastError() << L"). Falling back to manual backup copy." << std::endl;
+            std::wcerr << L"Warning: Atomic save failed (error " << atomic_error << L"). Falling back to manual backup copy." << std::endl;
             
             // Manual backup copy
             if (original_exists) {
-                CopyFileW(filename_.c_str(), backup_filename.c_str(), FALSE);
+                const std::wstring backup_temp = backup_filename + L".tmp." +
+                    std::to_wstring(GetCurrentProcessId()) + L"." +
+                    std::to_wstring(GetTickCount64()) + L"." +
+                    std::to_wstring(++save_sequence);
+                if (!CopyFileW(filename_.c_str(), backup_temp.c_str(), TRUE)) {
+                    const DWORD backup_error = GetLastError();
+                    throw std::runtime_error(
+                        "Could not create storage backup before fallback replacement. Latest data remains at: " +
+                        WStringToUTF8(temp_filename) + " (Error code: " +
+                        std::to_string(backup_error) + ")");
+                }
+                if (!MoveFileExW(backup_temp.c_str(), backup_filename.c_str(),
+                        MOVEFILE_REPLACE_EXISTING | MOVEFILE_WRITE_THROUGH)) {
+                    const DWORD backup_error = GetLastError();
+                    DeleteFileW(backup_temp.c_str());
+                    throw std::runtime_error(
+                        "Could not commit storage backup before fallback replacement. Latest data remains at: " +
+                        WStringToUTF8(temp_filename) + " (Error code: " +
+                        std::to_string(backup_error) + ")");
+                }
             }
             
             // Move temp to original with retry loop
@@ -572,9 +654,11 @@ public:
             }
 
             if (!move_success) {
-                DeleteFileW(temp_filename.c_str());
+                const DWORD move_error = GetLastError();
                 std::string filename_utf8 = WStringToUTF8(filename_);
-                throw std::runtime_error("Could not replace original file (MoveFileExW fallback): " + filename_utf8 + " (Error code: " + std::to_string(GetLastError()) + ")");
+                throw std::runtime_error("Could not replace original file (MoveFileExW fallback): " +
+                    filename_utf8 + ". Latest data remains at: " + WStringToUTF8(temp_filename) +
+                    " (Error code: " + std::to_string(move_error) + ")");
             }
         }
 #else

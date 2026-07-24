@@ -20,3 +20,12 @@ inline VinaStorage PoggetMain;
 inline PoggetDesktopContainerStorage DesktopContainerStorage;
 inline PoggetMagWinStorage MagWinStorage;
 inline PoggetQuickPanelStorage QuickPanelStorage;
+
+inline bool IsFileIntegrityVerificationEnabled() {
+	try {
+		return PoggetMain[L"PoggetRef"][L"verifyFileIntegrity"].get<bool>(false);
+	}
+	catch (...) {
+		return false;
+	}
+}

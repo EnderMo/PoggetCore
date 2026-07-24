@@ -1,4 +1,5 @@
 #pragma once
+#include <algorithm>
 #include <string>
 #include <vector>
 #include <set>
@@ -6,16 +7,18 @@
 #include <filesystem>
 #include <memory>
 #include "PoggetCoreItemManager.hpp"
+#include "PoggetHistoryFileSystem.hpp"
 
 namespace PoggetCore {
 
     struct CoreFileOp {
-        int type = 0; // 0: 物理添加, 1: 物理删除, 2: 物理重命名, 3: 虚拟添加, 4: 虚拟删除, 5: 虚拟别名修改
+        int type = 0; // 0: physical create/copy, 1: delete, 2: rename, 3-5: virtual, 6: move, 7: virtual path
         std::wstring path1;
         std::wstring path2;
         std::wstring alias;
         std::wstring originContainerId;
         std::vector<CoreFileOp> subOps;
+        std::wstring path3; // Backup of a destination replaced by the operation.
     };
 
     class ContainerModel {
@@ -65,6 +68,7 @@ namespace PoggetCore {
         int AutoHideTitleBar = 0;
         int QuickExpandCollapse = 1;
         int AutoFade = 0;
+        bool FadeOutSwitch = false;
         bool AutoFadeDragStat = false;
         int FolderOpenMode = 0;
         bool SwipeUpSearchEnabled = true;
@@ -93,9 +97,10 @@ namespace PoggetCore {
         std::set<int> SelectedIconIDs;
 
         // 撤销/重做逻辑状态
-        int maxHistory = 5;
+        int maxHistory = 100;
         std::vector<CoreFileOp> undoStack;
         std::vector<CoreFileOp> redoStack;
+        bool historyOperationInProgress = false;
 
         // 回调事件
         // 当数据发生改变，通知外层 UI 刷新
@@ -121,39 +126,41 @@ namespace PoggetCore {
             if (OnDataChanged) OnDataChanged();
         }
 
+        static void DisposeHistoryPayload(const CoreFileOp& op) {
+            if ((op.type == 0 || op.type == 1) &&
+                HistoryFileSystem::IsManagedHistoryPath(op.path2)) {
+                HistoryFileSystem::RemovePath(op.path2);
+            }
+            if (HistoryFileSystem::IsManagedHistoryPath(op.path3)) {
+                HistoryFileSystem::RemovePath(op.path3);
+            }
+            for (const auto& subOp : op.subOps) DisposeHistoryPayload(subOp);
+        }
+
         void PushUndo(const CoreFileOp& op) {
             undoStack.push_back(op);
-            if (undoStack.size() > static_cast<size_t>(maxHistory)) {
-                auto& oldest = undoStack.front();
-                if (oldest.type == 1 && std::filesystem::exists(oldest.path2)) {
-                    std::error_code ec;
-                    std::filesystem::remove(oldest.path2, ec);
-                }
-                for (const auto& subOp : oldest.subOps) {
-                    if (subOp.type == 1 && std::filesystem::exists(subOp.path2)) {
-                        std::error_code ec;
-                        std::filesystem::remove(subOp.path2, ec);
-                    }
-                }
+            const size_t historyLimit = static_cast<size_t>((std::max)(1, maxHistory));
+            while (undoStack.size() > historyLimit) {
+                DisposeHistoryPayload(undoStack.front());
                 undoStack.erase(undoStack.begin());
             }
-            for (auto& r : redoStack) {
-                if (r.type == 1 && std::filesystem::exists(r.path2)) {
-                    std::error_code ec;
-                    std::filesystem::remove(r.path2, ec);
-                }
-                for (const auto& subOp : r.subOps) {
-                    if (subOp.type == 1 && std::filesystem::exists(subOp.path2)) {
-                        std::error_code ec;
-                        std::filesystem::remove(subOp.path2, ec);
-                    }
-                }
-            }
+            for (const auto& redoOp : redoStack) DisposeHistoryPayload(redoOp);
             redoStack.clear();
 
             if (OnDataChanged) {
                 OnDataChanged();
             }
+        }
+
+        bool TryBeginHistoryOperation() {
+            if (historyOperationInProgress) return false;
+            historyOperationInProgress = true;
+            return true;
+        }
+
+        void EndHistoryOperation() {
+            historyOperationInProgress = false;
+            if (OnDataChanged) OnDataChanged();
         }
 
         void Save();

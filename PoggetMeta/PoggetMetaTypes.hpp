@@ -4,6 +4,8 @@
 
 namespace PoggetMeta {
 
+    class IPoggetMetaListener;
+
     enum class MetaOpType {
         Copy,
         Move,
@@ -24,6 +26,13 @@ namespace PoggetMeta {
         bool isMenuPaste = false; // Legacy fallback
         int batchCollisionChoice = 0;
         uint64_t batchId = 0;
+        std::wstring historyBackupRoot;
+        std::wstring replacedBackupPath;
+        std::wstring preflightError;
+        bool verifyContent = false;
+        IPoggetMetaListener* listener = nullptr;
+        bool notifyListener = true;
+        std::function<void(std::function<void()>)> dispatchToMainThread = nullptr;
         
         std::function<void()> onSuccess = nullptr;
         std::function<void()> onError = nullptr;
