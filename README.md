@@ -16,4 +16,11 @@ graph TD
     Core --> CoreMgr["PoggetContainerManager (收纳盒实例管理器)"]
     Core --> ItemMgr["PoggetCoreItemManager (文件元数据管理)"]
 ```
-
+### PoggetCore 逻辑层
+- **`PoggetCore::Storage`**：收纳盒的序列化解析模块（包含 `VinaStorage`、`VinaBuilder` 与 `vui.parser` 解析引擎）。
+- **`::tsl`**：内置有序哈希表算法依赖库 (`tsl::ordered_map`)。
+- **`ContainerModel`**：收纳盒纯逻辑模型，包含全部偏好属性、排版配置、批量选中句柄及撤消重做历史栈。
+- **`PoggetContainerManager`**：基于全局唯一收纳盒 ID (`ComID_xxx`) 进行生命周期路由与多端注册管理。
+- **`PoggetCoreItemManager`**：接管文件元数据缓存（包含图标尺寸、时间戳、目录状态等）。
+- **`PoggetStorageProvider`**：持久化引擎，包含磁盘 `.vina` 结构及 `ResMem_` 多分辨率布局自适应备份。
+- **`PoggetCoreManager`**：排版计算组件，计算图标的排版位置并向渲染层提供接口。
