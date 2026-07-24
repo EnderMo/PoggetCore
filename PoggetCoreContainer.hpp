@@ -39,14 +39,23 @@ namespace PoggetCore {
         bool IsCustomTarget = false;
 
         // 逻辑文件项管理器
+		// Logic file items are managed by PoggetCoreItemManager
+
         std::shared_ptr<PoggetCoreItemManager> itemManager = std::make_shared<PoggetCoreItemManager>();
 
         // 视图与排版逻辑状态
-        int SortMode = 0; // 0: 自由, 1: 名称正序, 2: 名称倒序, 3: 时间正序, 4: 时间倒序
+
+        // SortMode 0: 自由, 1: 名称正序, 2: 名称倒序, 3: 时间正序, 4: 时间倒序
+		// SortMode 0: Free, 1: Name Ascending, 2: Name Descending, 3: Time Ascending, 4: Time Descending
+        int SortMode = 0; 
+
         int IconSizeLevel = 3;
         bool ShowDefaultFolderIcon = false;
         bool ShowTextPreview = true;
         bool ShowMediaPreview = true;
+
+		// HideFileExtension 0: 显示, 1: 隐藏扩展名, 2: 隐藏文件名
+		// HideFileExtension 0: Show, 1: Hide Extension, 2: Hide Filename
         int HideFileExtension = 0; // 0,1,2
         int IconSpacingMode = 0;
         int IconSpacingType = 0;
@@ -61,6 +70,8 @@ namespace PoggetCore {
         bool DisableLayoutAnimations = false;
 
         // 模式与状态标志
+		// Mode and state flags
+
         bool IsLocked = false;
         bool IsEmbeddedLayer = false;
         bool IsUpwardExpand = false;
@@ -85,6 +96,8 @@ namespace PoggetCore {
         float shadowOffsetY = 4.0f;
 
         // 搜索与文件夹内联视图逻辑状态
+		// Search and inline folder view logic state
+
         bool IsSearchMode = false;
         std::wstring searchText = L"";
         bool EnableInlineFolderView = true;
@@ -93,10 +106,14 @@ namespace PoggetCore {
         std::vector<std::wstring> InlineFolderHistory;
 
         // 选中状态管理 (Core 层集中处理) 
+		// Selection state management (handled centrally in the Core layer)
+
         bool IsSelectMode = false;
         std::set<int> SelectedIconIDs;
 
         // 撤销/重做逻辑状态
+		// Undo/Redo logic state
+
         int maxHistory = 100;
         std::vector<CoreFileOp> undoStack;
         std::vector<CoreFileOp> redoStack;
@@ -104,6 +121,9 @@ namespace PoggetCore {
 
         // 回调事件
         // 当数据发生改变，通知外层 UI 刷新
+		// Callback event
+		// When data changes, notify the outer UI to refresh
+
         std::function<void()> OnDataChanged;
 
         // 批量选中 API

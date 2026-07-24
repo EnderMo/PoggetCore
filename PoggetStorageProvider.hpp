@@ -32,18 +32,23 @@ namespace PoggetCore {
         bool IsInitialized() const;
 
         // 统一提交接口 各个 ContainerModel 触发 Save 时将增量/全量属性提交给 Provider
+		// Universal commit interface: When each ContainerModel triggers Save, it submits incremental/full properties to the Provider
         void SubmitContainerModel(const ContainerModel& model);
 
         // 统一加载接口 根据 containerId 从 VinaStorage 加载到 ContainerModel
+		// Universal load interface: Load from VinaStorage to ContainerModel based on containerId
         bool LoadContainerModel(const std::wstring& containerId, ContainerModel& outModel);
 
         // 移除指定容器配置
+		// Remove the specified container configuration
         void RemoveContainerModel(const std::wstring& containerId);
 
 		// 保存 Storage，多分辨率兼容
+		// Save Storage, multi-resolution compatible
         void SaveStorage();
 
         // 直接访问全局 VinaStorage 代理 用于过渡兼容
+		// Directly access the global VinaStorage proxy for transitional compatibility
         VinaStorage& GetRawStorage() { return m_storage; }
     };
 

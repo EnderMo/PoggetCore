@@ -73,7 +73,7 @@ namespace PoggetCore {
         PoggetCoreManager() = default;
         virtual ~PoggetCoreManager() = default;
 
-        // 表面便捷接口
+		// Surface for accessing the instances of the managers
         static PoggetContainerManager& Containers() { return PoggetContainerManager::GetInstance(); }
         static PoggetStorageProvider& Storage() { return PoggetStorageProvider::GetInstance(); }
 
