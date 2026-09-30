@@ -13,6 +13,7 @@ namespace PoggetMeta {
         switch (operation) {
         case MetaOpType::Copy: return L"Copy";
         case MetaOpType::Move: return L"Move";
+        case MetaOpType::MoveByCopy: return L"MoveByCopy";
         case MetaOpType::Rename: return L"Rename";
         case MetaOpType::Delete: return L"Delete";
         case MetaOpType::Recycle: return L"Recycle";
@@ -346,6 +347,13 @@ namespace PoggetMeta {
                                 acceptResult(PoggetCore::HistoryFileSystem::MovePath(
                                     task.src, task.dest, task.verifyContent));
                             }
+                            else if (task.opType == MetaOpType::MoveByCopy) {
+                                const auto result =
+                                    PoggetCore::HistoryFileSystem::MovePathWithSharedProfileFallback(
+                                        task.src, task.dest, task.verifyContent);
+                                task.sourceDeleted = !result.sourceRetained;
+                                acceptResult(result);
+                            }
                             else if (task.opType == MetaOpType::Copy) {
                                 SetCopyProgress(0.5f);
                                 acceptResult(PoggetCore::HistoryFileSystem::CopyPath(
@@ -411,6 +419,8 @@ namespace PoggetMeta {
 
             if (success) {
                 auto successCallback = [taskListener, task]() {
+                        if (task.sourceDeleted == false && task.onSourceRetained)
+                            task.onSourceRetained();
                         if (task.onSuccess) task.onSuccess();
                         if (task.notifyListener && taskListener) {
                             taskListener->OnFilePasteSuccess(task);

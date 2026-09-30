@@ -14,7 +14,11 @@ namespace PoggetMeta {
         Delete,
         Recycle,
         PrivateDelete,
-        RecycleWithUndoBackup
+        RecycleWithUndoBackup,
+        // Public/Default profile items cannot always be renamed out of their
+        // protected source directory.  This operation copies the item first
+        // and removes the source only after the copy has completed.
+        MoveByCopy
     };
 
     enum class DeleteDisposition {
@@ -33,6 +37,7 @@ namespace PoggetMeta {
 
     inline constexpr bool OperationRequiresDestination(MetaOpType operation) noexcept {
         return operation == MetaOpType::Copy || operation == MetaOpType::Move ||
+            operation == MetaOpType::MoveByCopy ||
             operation == MetaOpType::Rename || operation == MetaOpType::PrivateDelete ||
             operation == MetaOpType::RecycleWithUndoBackup;
     }
@@ -70,9 +75,14 @@ namespace PoggetMeta {
         std::function<bool(const std::wstring&, const std::error_code&)> requestRetry = nullptr;
         std::wstring failureReason;
         std::error_code failureError;
+        // MoveByCopy reports a successful copy even when the final source
+        // deletion is rejected, so the UI can keep the copied item and record
+        // the operation as a copy instead of losing the destination.
+        bool sourceDeleted = true;
         
         std::function<void()> onSuccess = nullptr;
         std::function<void()> onError = nullptr;
+        std::function<void()> onSourceRetained = nullptr;
     };
 
 }

@@ -106,6 +106,7 @@ namespace PoggetCore {
         float backgroundAlpha = 1.0f;
         float titleAlpha = 1.0f;
         int CompatibleLayer = 0;
+        int DwmCornerPreference = 0;
         bool EnableStaticMaterialLayerForD3D11 = false;
         bool EnableDynamicMaterialLayerForD3D11 = false;
         float cornerRad = 16.0f;
@@ -123,6 +124,7 @@ namespace PoggetCore {
         bool IsInInlineFolderView = false;
         std::wstring InlineFolderPath = L"";
         std::vector<std::wstring> InlineFolderHistory;
+        std::vector<std::wstring> InlineFolderForwardHistory;
 
         // 选中状态管理 (Core 层集中处理) 
 		// Selection state management (handled centrally in the Core layer)

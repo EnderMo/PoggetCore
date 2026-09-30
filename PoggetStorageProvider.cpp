@@ -81,6 +81,7 @@ namespace PoggetCore {
         proxy[L"bgAlpha"] = model.backgroundAlpha;
         proxy[L"titleAlpha"] = model.titleAlpha;
         proxy[L"CompatibleLayer"] = model.CompatibleLayer;
+        proxy[L"DwmCornerPreference"] = model.DwmCornerPreference;
         proxy[L"EnableStaticMaterialLayerForD3D11"] = model.EnableStaticMaterialLayerForD3D11;
         proxy[L"EnableDynamicMaterialLayerForD3D11"] = model.EnableDynamicMaterialLayerForD3D11;
         proxy[L"cornerRad"] = model.cornerRad;
@@ -145,6 +146,7 @@ namespace PoggetCore {
         outModel.backgroundAlpha = static_cast<float>(proxy[L"bgAlpha"].get<double>(1.0));
         outModel.titleAlpha = static_cast<float>(proxy[L"titleAlpha"].get<double>(1.0));
         outModel.CompatibleLayer = proxy[L"CompatibleLayer"].get<int>(0);
+        outModel.DwmCornerPreference = proxy[L"DwmCornerPreference"].get<int>(0);
         outModel.EnableStaticMaterialLayerForD3D11 = proxy[L"EnableStaticMaterialLayerForD3D11"].get<bool>(false);
         outModel.EnableDynamicMaterialLayerForD3D11 = proxy[L"EnableDynamicMaterialLayerForD3D11"].get<bool>(false);
         outModel.cornerRad = static_cast<float>(proxy[L"cornerRad"].get<double>(16.0));

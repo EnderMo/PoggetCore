@@ -163,7 +163,8 @@ namespace PoggetCore::Storage {
         }
 
         FlowStorageResult UpdateMetadataManaged(const std::filesystem::path& installedPath,
-            std::string name, std::string publisher, std::string description) const {
+            std::string name, std::string publisher, std::string description,
+            FlowDocument* savedDocument = nullptr) const {
             std::filesystem::path relativePath;
             auto validated = ValidateManagedPath(installedPath, relativePath);
             if (!validated) return validated;
@@ -179,7 +180,9 @@ namespace PoggetCore::Storage {
             document.description = std::move(description);
             auto advanced = AdvanceRevision(document);
             if (!advanced) return advanced;
-            return storage.Save(document);
+            auto saved = storage.Save(document);
+            if (saved && savedDocument) *savedDocument = document;
+            return saved;
         }
 
         FlowStorageResult UpdateEnabledManaged(const std::filesystem::path& installedPath,

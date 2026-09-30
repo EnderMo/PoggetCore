@@ -1,6 +1,7 @@
 #pragma once
 
 #include "FlowDataflow.hpp"
+#include "FlowTrust.hpp"
 #include "../PoggetHistoryFileSystem.hpp"
 #include "../Storage/FlowCatalog.hpp"
 
@@ -57,12 +58,28 @@ namespace PoggetCore::Flow {
         std::wstring error;
     };
 
+    struct CreateContainerResult {
+        bool success = false;
+        std::string id;
+        std::wstring name;
+        std::wstring error;
+    };
+
+    struct RenameContainerResult {
+        bool success = false;
+        std::wstring error;
+    };
+
     struct RuntimeAdapters {
         std::function<ResolveContainerFolderResult(const std::string&)>
             resolveMoveTargetFolder;
         std::function<MapFileResult(const std::string&,
             const std::filesystem::path&, MapInsertPosition)> mapFile;
         std::function<ShowTipResult(const std::wstring&, const std::wstring&)> showTip;
+        std::function<CreateContainerResult(const std::wstring&, std::string_view,
+            const std::wstring&)> createContainer;
+        std::function<RenameContainerResult(const std::string&, const std::wstring&)>
+            renameContainer;
         std::function<void(const std::wstring&, const std::wstring&)> log;
         std::function<std::chrono::system_clock::time_point()> currentTime;
     };
@@ -200,6 +217,22 @@ namespace PoggetCore::Flow {
 #endif
         }
 
+        static std::string WideToUtf8(std::wstring_view text) {
+#ifdef _WIN32
+            if (text.empty()) return {};
+            const int length = WideCharToMultiByte(CP_UTF8, WC_ERR_INVALID_CHARS,
+                text.data(), static_cast<int>(text.size()), nullptr, 0, nullptr, nullptr);
+            if (length <= 0) return {};
+            std::string result(static_cast<std::size_t>(length), '\0');
+            if (WideCharToMultiByte(CP_UTF8, WC_ERR_INVALID_CHARS, text.data(),
+                static_cast<int>(text.size()), result.data(), length, nullptr, nullptr) != length)
+                return {};
+            return result;
+#else
+            return std::string(text.begin(), text.end());
+#endif
+        }
+
         static std::filesystem::path PathFromUtf8(std::string_view text) {
 #if defined(__cpp_lib_char8_t)
             const auto* begin = reinterpret_cast<const char8_t*>(text.data());
@@ -295,8 +328,32 @@ namespace PoggetCore::Flow {
             std::wstring output;
             output.reserve((std::min)(input.size() + 32, maxExpandedCharacters_));
             std::size_t cursor = 0;
+            const auto isBuiltinName = [](std::wstring_view name) {
+                if (name.empty()) return false;
+                return std::all_of(name.begin(), name.end(), [](wchar_t character) {
+                    return (character >= L'a' && character <= L'z') ||
+                        (character >= L'A' && character <= L'Z') ||
+                        (character >= L'0' && character <= L'9') ||
+                        character == L'_';
+                });
+            };
             while (cursor < input.size() && output.size() < maxExpandedCharacters_) {
-                const auto marker = input.find(L"${", cursor);
+                const auto expression = input.find(L"${", cursor);
+                auto builtin = input.find(L'$', cursor);
+                while (builtin != std::wstring_view::npos) {
+                    const auto end = input.find(L'$', builtin + 1);
+                    if (end != std::wstring_view::npos &&
+                        isBuiltinName(input.substr(builtin + 1, end - builtin - 1)))
+                        break;
+                    builtin = input.find(L'$', builtin + 1);
+                }
+                std::size_t marker = expression;
+                bool builtinMarker = false;
+                if (builtin != std::wstring_view::npos &&
+                    (marker == std::wstring_view::npos || builtin < marker)) {
+                    marker = builtin;
+                    builtinMarker = true;
+                }
                 if (marker == std::wstring_view::npos) {
                     output.append(input.substr(cursor,
                         (std::min)(input.size() - cursor,
@@ -304,14 +361,17 @@ namespace PoggetCore::Flow {
                     break;
                 }
                 output.append(input.substr(cursor, marker - cursor));
-                const auto end = input.find(L'}', marker + 2);
+                const auto end = input.find(builtinMarker ? L'$' : L'}',
+                    marker + (builtinMarker ? 1 : 2));
                 if (end == std::wstring_view::npos) {
                     output.append(input.substr(marker));
                     break;
                 }
-                const std::wstring key(input.substr(marker + 2, end - marker - 2));
+                const std::wstring key(input.substr(marker + (builtinMarker ? 1 : 2),
+                    end - marker - (builtinMarker ? 1 : 2)));
                 const auto found = context.find(key);
                 if (found != context.end()) output.append(ValueText(found->second));
+                else output.append(input.substr(marker, end - marker + 1));
                 cursor = end + 1;
             }
             if (output.size() > maxExpandedCharacters_) output.resize(maxExpandedCharacters_);
@@ -329,7 +389,20 @@ namespace PoggetCore::Flow {
 
         static void SetNodeOutput(Context& context, const Storage::FlowNode& node,
             std::string_view port, RuntimeValue value) {
-            context[Utf8ToWide(FlowOutputKey(node, port))] = std::move(value);
+            const auto key = Utf8ToWide(FlowOutputKey(node, port));
+            context[key] = value;
+            if (port == "file" || port == "path") {
+                const auto text = ValueText(value);
+                context[L"FilePath"] = value;
+                context[L"FileName"] = std::filesystem::path(text).filename().wstring();
+                context[L"FileExtension"] = std::filesystem::path(text).extension().wstring();
+                context[L"FileDirectory"] = std::filesystem::path(text).parent_path().wstring();
+            }
+        }
+
+        static void SetNodeOutput(Context& context, const Storage::FlowNode& node,
+            std::string_view port, const wchar_t* value) {
+            SetNodeOutput(context, node, port, std::wstring(value ? value : L""));
         }
 
         static std::optional<std::filesystem::path> ResolveFileInput(
@@ -574,7 +647,7 @@ namespace PoggetCore::Flow {
                     needsContainerSnapshots_.store(false, std::memory_order_relaxed);
                 }
                 if (runTick && !root.empty()) RunAutomaticTick(root, containers);
-                for (const auto& path : manual) RunManual(path);
+                for (const auto& path : manual) RunManual(root, path);
                 activeAdapters_ = {};
 
                 {
@@ -594,17 +667,25 @@ namespace PoggetCore::Flow {
             }
 
             ++automaticTick_;
+            const FlowTrustStore trustStore(root);
             std::unordered_set<std::wstring> activeDirectoryKeys;
             std::unordered_set<std::wstring> activeContainerKeys;
 			std::unordered_set<std::wstring> activeScheduleKeys;
 			bool hasContainerMonitor = false;
             std::unordered_map<std::wstring, std::optional<DirectorySnapshot>> scanCache;
             for (const auto& entry : catalog.entries) {
-                if (entry.state != Storage::FlowCatalogEntryState::ready ||
-                    !entry.document.enabled || !entry.document.trigger ||
-                    !entry.document.trigger->enabled ||
-                    !IsAutomaticTrigger(entry.document.trigger->type)) continue;
-                const auto& trigger = *entry.document.trigger;
+                if (entry.state != Storage::FlowCatalogEntryState::ready) continue;
+                const auto trust = trustStore.Inspect(entry.path, entry.document.id);
+                if (!trust.trusted()) {
+                    Log(L"WARNING", L"Skipped untrusted Flow during automatic execution: " +
+                        entry.path.filename().wstring());
+                    continue;
+                }
+                const auto& document = trust.document;
+                if (!document.enabled || !document.trigger ||
+                    !document.trigger->enabled ||
+                    !IsAutomaticTrigger(document.trigger->type)) continue;
+                const auto& trigger = *document.trigger;
                 const auto validation = ValidateModule(trigger, "$.trigger");
                 if (!validation) {
                     Log(L"WARNING", L"Skipped invalid Flow trigger: " +
@@ -628,7 +709,7 @@ namespace PoggetCore::Flow {
                         cached = scanCache.emplace(cacheKey,
                             ScanDirectory(rootPath, recursive)).first;
                     if (!cached->second) continue;
-                    ProcessDirectory(entry.document, trigger, state,
+                    ProcessDirectory(document, trigger, state,
                         *cached->second);
                 }
                 else if (trigger.type == TriggerContainer) {
@@ -640,7 +721,7 @@ namespace PoggetCore::Flow {
                     const auto id = StringParameter(trigger, "containerId");
                     const auto found = containers.find(id);
                     if (found == containers.end()) continue;
-                    ProcessContainer(entry.document, trigger, state, found->second);
+                    ProcessContainer(document, trigger, state, found->second);
                 }
                 else if (trigger.type == TriggerSchedule) {
                     const auto slot = CurrentLocalTimeSlot();
@@ -652,7 +733,7 @@ namespace PoggetCore::Flow {
                     if (slot->second.first == hour && slot->second.second == minute &&
                         scheduleState.lastTimeSlot != slot->first) {
                         scheduleState.lastTimeSlot = slot->first;
-                        Execute(entry.document, std::nullopt);
+                        Execute(document, std::nullopt);
                     }
                 }
             }
@@ -793,14 +874,15 @@ namespace PoggetCore::Flow {
             for (const auto& event : events) Execute(document, event);
         }
 
-        void RunManual(const std::filesystem::path& path) {
-            Storage::FlowDocument document;
-            const auto loaded = Storage::FlowCatalog::LoadReadOnly(path, document);
-            if (!loaded) {
-                Log(L"ERROR", L"Could not load Flow for manual execution.");
+        void RunManual(const std::filesystem::path& root,
+            const std::filesystem::path& path) {
+            const auto trust = FlowTrustStore(root).Inspect(path);
+            if (!trust.trusted()) {
+                Log(L"WARNING", L"Blocked manual execution of an untrusted Flow: " +
+                    path.filename().wstring());
                 return;
             }
-            Execute(document, std::nullopt);
+            Execute(trust.document, std::nullopt);
         }
 
         void Execute(const Storage::FlowDocument& document,
@@ -1121,6 +1203,96 @@ namespace PoggetCore::Flow {
                     SetNodeOutput(context, node, "content", std::move(content));
                     SetNodeOutput(context, node, "success", true);
                     SetNodeOutput(context, node, "error", std::wstring{});
+                    continue;
+                }
+                if (node.type == ActionCreateContainer) {
+                    SetNodeOutput(context, node, "success", false);
+                    SetNodeOutput(context, node, "id", std::wstring{});
+                    SetNodeOutput(context, node, "name", std::wstring{});
+                    SetNodeOutput(context, node, "error", std::wstring{});
+                    if (!activeAdapters_.createContainer) {
+                        SetNodeOutput(context, node, "error", L"container creation adapter is unavailable");
+                        continue;
+                    }
+                    const auto name = Expand(Utf8ToWide(StringParameter(node, "name")), context);
+                    const auto mode = StringParameter(node, "mode");
+                    const auto target = Expand(Utf8ToWide(StringParameter(node, "targetDirectory")), context);
+                    CreateContainerResult created;
+                    try { created = activeAdapters_.createContainer(name, mode, target); }
+                    catch (...) { created.error = L"container creation failed unexpectedly"; }
+                    if (!created.success) {
+                        SetNodeOutput(context, node, "error", created.error.empty() ?
+                            L"container creation failed" : created.error);
+                        continue;
+                    }
+                    SetNodeOutput(context, node, "id", Utf8ToWide(created.id));
+                    SetNodeOutput(context, node, "name", created.name.empty() ? name : created.name);
+                    SetNodeOutput(context, node, "success", true);
+                    continue;
+                }
+                if (node.type == ActionRenameContainer) {
+                    SetNodeOutput(context, node, "success", false);
+                    SetNodeOutput(context, node, "error", std::wstring{});
+                    if (!activeAdapters_.renameContainer) {
+                        SetNodeOutput(context, node, "error", L"container rename adapter is unavailable");
+                        continue;
+                    }
+                    std::string id = StringParameter(node, "containerId");
+                    if (const auto* binding = ResolveBoundInput(node, "container", context))
+                        id = WideToUtf8(ValueText(*binding));
+                    const auto name = Expand(Utf8ToWide(StringParameter(node, "name")), context);
+                    RenameContainerResult renamed;
+                    try { renamed = activeAdapters_.renameContainer(id, name); }
+                    catch (...) { renamed.error = L"container rename failed unexpectedly"; }
+                    if (!renamed.success)
+                        SetNodeOutput(context, node, "error", renamed.error.empty() ?
+                            L"container rename failed" : renamed.error);
+                    else SetNodeOutput(context, node, "success", true);
+                    continue;
+                }
+                if (node.type == ActionRunProgram) {
+                    SetNodeOutput(context, node, "success", false);
+                    SetNodeOutput(context, node, "exitCode", std::wstring{});
+                    SetNodeOutput(context, node, "error", std::wstring{});
+                    const auto source = ResolveFileInput(node, "file", "source", context);
+                    if (source) SetNodeOutput(context, node, "file", *source);
+                    const auto executable = Expand(Utf8ToWide(StringParameter(node, "executable")), context);
+                    const auto arguments = Expand(Utf8ToWide(StringParameter(node, "arguments")), context);
+                    const auto workingDirectory = Expand(Utf8ToWide(
+                        StringParameter(node, "workingDirectory")), context);
+                    if (executable.empty()) {
+                        SetNodeOutput(context, node, "error", L"program path is empty");
+                        continue;
+                    }
+#ifdef _WIN32
+                    std::wstring commandLine = L"\"" + executable + L"\"";
+                    if (!arguments.empty()) commandLine += L" " + arguments;
+                    std::vector<wchar_t> command(commandLine.begin(), commandLine.end());
+                    command.push_back(L'\0');
+                    STARTUPINFOW startup{};
+                    startup.cb = sizeof(startup);
+                    PROCESS_INFORMATION process{};
+                    const auto cwd = workingDirectory.empty() ? nullptr : workingDirectory.c_str();
+                    if (!CreateProcessW(nullptr, command.data(), nullptr, nullptr, FALSE,
+                        CREATE_UNICODE_ENVIRONMENT | CREATE_NO_WINDOW, nullptr, cwd,
+                        &startup, &process)) {
+                        SetNodeOutput(context, node, "error", L"local program could not be started");
+                        continue;
+                    }
+                    const bool wait = BoolParameter(node, "wait", true);
+                    DWORD exitCode = STILL_ACTIVE;
+                    if (wait) {
+                        WaitForSingleObject(process.hProcess, INFINITE);
+                        GetExitCodeProcess(process.hProcess, &exitCode);
+                    }
+                    else exitCode = 0;
+                    CloseHandle(process.hThread);
+                    CloseHandle(process.hProcess);
+                    SetNodeOutput(context, node, "exitCode", std::to_wstring(exitCode));
+                    SetNodeOutput(context, node, "success", !wait || exitCode == 0);
+#else
+                    SetNodeOutput(context, node, "error", L"local program execution is only supported on Windows");
+#endif
                     continue;
                 }
                 if (node.type == InteractionTip) {

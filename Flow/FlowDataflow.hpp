@@ -53,6 +53,15 @@ namespace PoggetCore::Flow {
         matchedFile,
         unmatchedFile,
         tipResult
+        ,containerCreatedId
+        ,containerCreatedName
+        ,containerCreateSuccess
+        ,containerCreateError
+        ,containerRenameSuccess
+        ,containerRenameError
+        ,programSuccess
+        ,programExitCode
+        ,programError
     };
 
     struct FlowInputDescriptor {
@@ -131,12 +140,16 @@ namespace PoggetCore::Flow {
     inline std::vector<FlowInputDescriptor> DescribeFlowInputs(
         std::string_view type) {
         if (type == ActionMoveFile || type == ActionMapFile ||
-            type == ActionRegexRename || type == ActionReadText)
+            type == ActionRegexRename || type == ActionReadText ||
+            type == ActionRunProgram)
             return { { "file", FlowValueType::file, "source" } };
         if (type == ControlIf) return {
             { "file", FlowValueType::file, "source" },
             { "text", FlowValueType::text, "left" },
             { "boolean", FlowValueType::boolean, "left" }
+        };
+        if (type == ActionRenameContainer) return {
+            { "container", FlowValueType::text, "containerId" }
         };
         return {};
     }
@@ -192,7 +205,16 @@ namespace PoggetCore::Flow {
             semantic == FlowPortSemantic::readSuccess ||
             semantic == FlowPortSemantic::readError ||
             semantic == FlowPortSemantic::conditionResult ||
-            semantic == FlowPortSemantic::tipResult;
+            semantic == FlowPortSemantic::tipResult ||
+            semantic == FlowPortSemantic::containerCreatedId ||
+            semantic == FlowPortSemantic::containerCreatedName ||
+            semantic == FlowPortSemantic::containerCreateSuccess ||
+            semantic == FlowPortSemantic::containerCreateError ||
+            semantic == FlowPortSemantic::containerRenameSuccess ||
+            semantic == FlowPortSemantic::containerRenameError ||
+            semantic == FlowPortSemantic::programSuccess ||
+            semantic == FlowPortSemantic::programExitCode ||
+            semantic == FlowPortSemantic::programError;
     }
 
     inline std::vector<FlowPortReference> DescribeFlowOutputs(
@@ -266,6 +288,30 @@ namespace PoggetCore::Flow {
             return { MakeFlowPort(node, "accepted", FlowValueType::boolean,
                 FlowPortScope::following, FlowPortSemantic::tipResult) };
         }
+        if (node.type == ActionCreateContainer) return {
+            MakeFlowPort(node, "id", FlowValueType::text, FlowPortScope::following,
+                FlowPortSemantic::containerCreatedId),
+            MakeFlowPort(node, "name", FlowValueType::text, FlowPortScope::following,
+                FlowPortSemantic::containerCreatedName),
+            MakeFlowPort(node, "success", FlowValueType::boolean, FlowPortScope::following,
+                FlowPortSemantic::containerCreateSuccess),
+            MakeFlowPort(node, "error", FlowValueType::text, FlowPortScope::following,
+                FlowPortSemantic::containerCreateError)
+        };
+        if (node.type == ActionRenameContainer) return {
+            MakeFlowPort(node, "success", FlowValueType::boolean, FlowPortScope::following,
+                FlowPortSemantic::containerRenameSuccess),
+            MakeFlowPort(node, "error", FlowValueType::text, FlowPortScope::following,
+                FlowPortSemantic::containerRenameError)
+        };
+        if (node.type == ActionRunProgram) return {
+            MakeFlowPort(node, "success", FlowValueType::boolean, FlowPortScope::following,
+                FlowPortSemantic::programSuccess),
+            MakeFlowPort(node, "exitCode", FlowValueType::text, FlowPortScope::following,
+                FlowPortSemantic::programExitCode),
+            MakeFlowPort(node, "error", FlowValueType::text, FlowPortScope::following,
+                FlowPortSemantic::programError)
+        };
         return {};
     }
 

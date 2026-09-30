@@ -20,6 +20,9 @@ namespace PoggetCore::Flow {
     inline constexpr std::string_view ActionMapFile = "pogget.action.file.map";
     inline constexpr std::string_view ActionRegexRename = "pogget.action.file.regexRename";
     inline constexpr std::string_view ActionReadText = "pogget.action.file.readText";
+    inline constexpr std::string_view ActionCreateContainer = "pogget.action.container.create";
+    inline constexpr std::string_view ActionRenameContainer = "pogget.action.container.rename";
+    inline constexpr std::string_view ActionRunProgram = "pogget.action.program.run";
     inline constexpr std::string_view ControlIf = "pogget.control.if";
     inline constexpr std::string_view InteractionTip = "pogget.interaction.tip";
 
@@ -30,6 +33,8 @@ namespace PoggetCore::Flow {
 
     inline constexpr std::string_view MapInsertEnd = "end";
     inline constexpr std::string_view MapInsertBeginning = "beginning";
+    inline constexpr std::string_view ContainerModeOrdinary = "ordinary";
+    inline constexpr std::string_view ContainerModeMapped = "mapped";
 
     enum class ModuleKind {
         manualTrigger,
@@ -113,6 +118,21 @@ namespace PoggetCore::Flow {
         { "title", ModuleFieldKind::text, false, 512 },
         { "message", ModuleFieldKind::text, true, 16 * 1024 }
     } };
+    inline constexpr std::array<ModuleFieldDescriptor, 3> CreateContainerFields{ {
+        { "name", ModuleFieldKind::text, true, 512 },
+        { "mode", ModuleFieldKind::choice, true, 16 },
+        { "targetDirectory", ModuleFieldKind::folder, false, 32 * 1024 }
+    } };
+    inline constexpr std::array<ModuleFieldDescriptor, 2> RenameContainerFields{ {
+        { "containerId", ModuleFieldKind::container, false, 256 },
+        { "name", ModuleFieldKind::text, true, 512 }
+    } };
+    inline constexpr std::array<ModuleFieldDescriptor, 4> RunProgramFields{ {
+        { "executable", ModuleFieldKind::text, true, 32 * 1024 },
+        { "arguments", ModuleFieldKind::text, false, 32 * 1024 },
+        { "workingDirectory", ModuleFieldKind::folder, false, 32 * 1024 },
+        { "wait", ModuleFieldKind::boolean, false, 0 }
+    } };
 
     inline std::span<const ModuleFieldDescriptor> DescribeModuleFields(
         std::string_view type) noexcept {
@@ -125,10 +145,13 @@ namespace PoggetCore::Flow {
         if (type == ActionReadText) return ReadTextFields;
         if (type == ControlIf) return IfFields;
         if (type == InteractionTip) return TipFields;
+        if (type == ActionCreateContainer) return CreateContainerFields;
+        if (type == ActionRenameContainer) return RenameContainerFields;
+        if (type == ActionRunProgram) return RunProgramFields;
         return {};
     }
 
-    inline constexpr std::array<ModuleDescriptor, 10> Modules{ {
+    inline constexpr std::array<ModuleDescriptor, 13> Modules{ {
         { TriggerManual, ModuleKind::manualTrigger, "Manual trigger", false },
         { TriggerDirectory, ModuleKind::automaticTrigger, "Directory monitor", false },
         { TriggerContainer, ModuleKind::automaticTrigger, "Container monitor", false },
@@ -138,7 +161,10 @@ namespace PoggetCore::Flow {
         { ActionRegexRename, ModuleKind::action, "Regex rename", true },
         { ActionReadText, ModuleKind::action, "Read text file", true },
         { ControlIf, ModuleKind::control, "If", false },
-        { InteractionTip, ModuleKind::interaction, "Show prompt", false }
+        { InteractionTip, ModuleKind::interaction, "Show prompt", false },
+        { ActionCreateContainer, ModuleKind::action, "Create container", true },
+        { ActionRenameContainer, ModuleKind::action, "Rename container", true },
+        { ActionRunProgram, ModuleKind::action, "Run local program", true }
     } };
 
     inline const ModuleDescriptor* FindModule(std::string_view type) noexcept {
@@ -407,6 +433,36 @@ namespace PoggetCore::Flow {
         if (node.type == InteractionTip) {
             if (!(result = Detail::RequireString(node, "message", path, 16 * 1024))) return result;
             return Detail::OptionalString(node, "title", path, 512);
+        }
+        if (node.type == ActionCreateContainer) {
+            if (!(result = Detail::RequireString(node, "name", path, 512))) return result;
+            if (!(result = Detail::RequireString(node, "mode", path, 16))) return result;
+            if (!Detail::StringIsOneOf(node, "mode",
+                { ContainerModeOrdinary, ContainerModeMapped }))
+                return Detail::Error(path + ".parameters.mode", "unsupported container mode");
+            if (!(result = Detail::OptionalString(node, "targetDirectory", path,
+                32 * 1024))) return result;
+            const auto* target = Detail::Parameter(node, "targetDirectory");
+            const auto* targetText = target ? target->get_if<std::string>() : nullptr;
+            const bool hasTarget = targetText && !targetText->empty();
+            const auto* mode = Detail::Parameter(node, "mode");
+            const auto* modeText = mode ? mode->get_if<std::string>() : nullptr;
+            if (modeText && (std::string_view(*modeText) == ContainerModeMapped) != hasTarget)
+                return Detail::Error(path + ".parameters", "mapped containers require a target directory and ordinary containers do not");
+            return {};
+        }
+        if (node.type == ActionRenameContainer) {
+            const bool hasBinding = Detail::HasInput(node, "container");
+            if (!hasBinding && !(result = Detail::RequireString(node, "containerId", path, 256))) return result;
+            if (hasBinding && !(result = Detail::OptionalString(node, "containerId", path, 256))) return result;
+            return Detail::RequireString(node, "name", path, 512);
+        }
+        if (node.type == ActionRunProgram) {
+            if (!(result = Detail::RequireString(node, "executable", path, 32 * 1024))) return result;
+            if (!(result = Detail::OptionalString(node, "arguments", path, 32 * 1024))) return result;
+            if (!(result = Detail::OptionalString(node, "workingDirectory", path, 32 * 1024))) return result;
+            if (!(result = Detail::OptionalBool(node, "wait", path))) return result;
+            return {};
         }
         if (node.type == ControlIf) {
             if (!(result = Detail::RequireString(node, "left", path, 128))) return result;

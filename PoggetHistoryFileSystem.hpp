@@ -35,6 +35,13 @@ namespace PoggetCore::HistoryFileSystem {
         bool success = false;
         std::error_code error;
         std::wstring context;
+        // The requested move published a verified destination, but the source
+        // could not be removed.  Callers must treat the result as a copy for
+        // history/UI purposes and may ask the user to delete the source.
+        bool sourceRetained = false;
+        // A shared-profile destination rejected creation/write access.  UI
+        // callers may offer a writable per-user desktop destination instead.
+        bool protectedDestinationDenied = false;
 
         explicit operator bool() const noexcept { return success; }
     };
@@ -287,6 +294,29 @@ namespace PoggetCore::HistoryFileSystem {
             parentKey.push_back(std::filesystem::path::preferred_separator);
         }
         return candidateKey.starts_with(parentKey);
+    }
+
+    inline bool IsWindowsSharedProfilePath(
+        const std::filesystem::path& path) noexcept {
+#ifdef _WIN32
+        if (path.empty()) return false;
+        std::error_code ec;
+        auto absolute = std::filesystem::absolute(path, ec).lexically_normal();
+        if (ec) absolute = path.lexically_normal();
+        std::wstring previous;
+        for (const auto& component : absolute) {
+            std::wstring current = component.wstring();
+            std::transform(current.begin(), current.end(), current.begin(), ::towlower);
+            if (previous == L"users" &&
+                (current == L"public" || current == L"default")) {
+                return true;
+            }
+            previous = std::move(current);
+        }
+#else
+        (void)path;
+#endif
+        return false;
     }
 
     inline Result ValidateDestructiveBatch(
@@ -845,7 +875,6 @@ namespace PoggetCore::HistoryFileSystem {
         const std::filesystem::path& destination) noexcept {
         const auto sourceAccess = FileSystemAccessPath(source).wstring();
         const auto destinationParent = ResolveExistingParent(destination);
-        const auto destinationAccess = FileSystemAccessPath(destination).wstring();
         if (destinationParent.empty() || destination.filename().empty()) {
             return std::make_error_code(std::errc::invalid_argument);
         }
@@ -859,8 +888,14 @@ namespace PoggetCore::HistoryFileSystem {
                 std::system_category());
         }
 
+        // FILE_RENAME_INFO is a variable-length structure.  Keep the trailing
+        // NUL even though FileNameLength excludes it: several redirector and
+        // cloud-file providers read the terminator while validating the rename
+        // payload and otherwise return ERROR_INVALID_PARAMETER.
+        const auto destinationAccess = FileSystemAccessPath(destination).wstring();
         const size_t fileNameBytes = destinationAccess.size() * sizeof(wchar_t);
-        const size_t bufferSize = offsetof(FILE_RENAME_INFO, FileName) + fileNameBytes;
+        const size_t bufferSize = offsetof(FILE_RENAME_INFO, FileName) +
+            fileNameBytes + sizeof(wchar_t);
         if (bufferSize > static_cast<size_t>((std::numeric_limits<DWORD>::max)())) {
             ::CloseHandle(sourceHandle);
             return std::make_error_code(std::errc::filename_too_long);
@@ -871,6 +906,7 @@ namespace PoggetCore::HistoryFileSystem {
         information->RootDirectory = nullptr;
         information->FileNameLength = static_cast<DWORD>(fileNameBytes);
         std::copy(destinationAccess.begin(), destinationAccess.end(), information->FileName);
+        information->FileName[destinationAccess.size()] = L'\0';
 
         const BOOL succeeded = ::SetFileInformationByHandle(
             sourceHandle, FileRenameInfo, information,
@@ -1155,25 +1191,37 @@ namespace PoggetCore::HistoryFileSystem {
         }
 
 #ifdef _WIN32
-        if (volumeRelation == VolumeRelation::Same) {
+        // A volume query can legitimately be unavailable for provider-backed
+        // desktop paths (OneDrive/Cloud Files, redirected Desktop, UNC roots).
+        // In that case a transient path-rename failure must still get the
+        // handle-based rename attempt.  It remains safe: the handle operation
+        // is metadata-only and cannot copy or delete data.
+        if ((volumeRelation == VolumeRelation::Same || volumeRelation == VolumeRelation::Unknown) &&
+            IsTransientRenameError(ec)) {
             const auto pathRenameError = ec;
             ec = RenamePathByHandle(source, destination);
             if (!ec) {
                 PoggetLogger::Log(L"FileOperation", L"WARNING",
-                    L"Path rename failed but same-volume handle rename succeeded: source=\"" +
+                    L"Path rename failed but handle-based rename succeeded: source=\"" +
                     source.wstring() + L"\" destination=\"" + destination.wstring() +
                     L"\" pathError=" + std::to_wstring(pathRenameError.value()) +
                     L" volume=" + std::to_wstring(sourceVolume));
                 return AuditedResult(operation, source, destination,
                     { true, {},
-                        L"same-volume handle rename used after path rename failure" });
+                        L"handle-based rename used after path rename failure" });
             }
             PoggetLogger::Log(L"FileOperation", L"ERROR",
-                L"Same-volume rename failed without copying: source=\"" +
+                L"Handle rename failed without copying: source=\"" +
                 source.wstring() + L"\" destination=\"" + destination.wstring() +
                 L"\" pathError=" + std::to_wstring(pathRenameError.value()) +
                 L" handleError=" + std::to_wstring(ec.value()) +
-                L" volume=" + std::to_wstring(sourceVolume));
+                L" volume=" + std::to_wstring(sourceVolume) +
+                L" relation=" + std::to_wstring(static_cast<int>(volumeRelation)));
+
+            // If the handle API conclusively reports a cross-volume move, the
+            // relation query was stale/unknown.  The existing two-phase
+            // cross-volume transaction below takes over; generic access-denied
+            // and sharing errors never trigger a copy fallback.
         }
 #endif
 
@@ -1267,6 +1315,59 @@ namespace PoggetCore::HistoryFileSystem {
         }
         return AuditedResult(operation, source, destination,
             { true, {}, L"" });
+    }
+
+    /*
+     * Windows shared profile directories may permit reading/copying and
+     * deleting an existing item while denying a direct rename across the
+     * directory boundary.  For those paths only, publish and verify the copy
+     * before attempting source deletion.  A copy failure always leaves the
+     * source untouched.  A delete failure keeps both copies and is reported
+     * through sourceRetained without converting the safe copy into a failure.
+     */
+    inline Result MovePathWithSharedProfileFallback(
+        const std::filesystem::path& source,
+        const std::filesystem::path& destination,
+        bool verifyContent = false) {
+        if (source.empty() || destination.empty() ||
+            ComparablePath(source) == ComparablePath(destination)) {
+            return MovePath(source, destination, verifyContent);
+        }
+        if (!IsWindowsSharedProfilePath(source) &&
+            !IsWindowsSharedProfilePath(destination)) {
+            return MovePath(source, destination, verifyContent);
+        }
+
+        // Source deletion is irreversible from this transaction's point of
+        // view, so shared-profile fallback always enables content verification
+        // even when the optional global verification setting is disabled.
+        auto copyResult = CopyPath(source, destination, true);
+        if (!copyResult) {
+            const bool accessDenied =
+                copyResult.error.default_error_condition() == std::errc::permission_denied
+#ifdef _WIN32
+                || (copyResult.error.category() == std::system_category() &&
+                    copyResult.error.value() == ERROR_ACCESS_DENIED)
+#endif
+                ;
+            copyResult.protectedDestinationDenied =
+                IsWindowsSharedProfilePath(destination) && accessDenied;
+            copyResult.context = L"copying shared-profile item before source removal: " +
+                copyResult.context;
+            return copyResult;
+        }
+
+        // This is intentionally sequenced after CopyPath returned success.
+        // CopyPath does not report success until its destination is published
+        // and content verification has completed.
+        const auto removeResult = RemovePathWithRetries(source);
+        if (removeResult) {
+            return { true, {}, L"copied shared-profile item and removed source", false, false };
+        }
+        return { true, removeResult.error,
+            L"shared-profile destination was copied successfully, but the source "
+            L"could not be deleted and was retained",
+            true, false };
     }
 
     inline Result SelectUniqueDestination(
@@ -1516,7 +1617,7 @@ namespace PoggetCore::HistoryFileSystem {
             [](const std::filesystem::path& source,
                 const std::filesystem::path& destination,
                 bool verify) {
-                return MovePath(source, destination, verify);
+                return MovePathWithSharedProfileFallback(source, destination, verify);
             },
             RestoreFailurePolicy::KeepCommittedItems);
     }
