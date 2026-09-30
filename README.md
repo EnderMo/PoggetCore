@@ -2,8 +2,7 @@
 
 ![C++](https://img.shields.io/badge/Language-C++-00599C.svg)
 
-PoggetCore 是一款基于 C++20 构建的高性能、跨平台架构的桌面收纳与桌面整理工具。在 Pogget 的实践中，PoggetCore 搭载 [VinaUI](https://github.com/EnderMo/VinaUI) 进行接入，实现轻量、高性能的渲染。
-其上层应用为 Pogget，可在项目官网[https://pogget.vilinko.com](https://pogget.vilinko.com)下载 Release 版本。
+PoggetCore 是一款基于 C++20 构建的高性能、跨平台架构的桌面收纳与桌面整理工具。在 Pogget 的实践中，PoggetCore 搭载 [VinaUI](https://github.com/EnderMo/VinaUI) 进行接入，实现轻量、高性能的渲染。可在项目官网[https://pogget.vilinko.com](https://pogget.vilinko.com)下载 Release 版本。
 
 ---
 
